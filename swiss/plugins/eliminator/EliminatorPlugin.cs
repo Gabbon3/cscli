@@ -1,4 +1,5 @@
 ﻿using System.Text.RegularExpressions;
+using System.Threading.Channels;
 using plugins;
 using utils;
 
@@ -36,6 +37,7 @@ namespace swiss.plugins.eliminator
             bool isForce = options.ContainsKey("--force") || options.ContainsKey("-f") || options.ContainsKey("-y");
             bool regexIgnoreCase = options.ContainsKey("--ignore-case") || options.ContainsKey("-i");
             bool targetDirs = options.ContainsKey("--dirs");
+            bool isParallel = options.ContainsKey("--parallel") || options.ContainsKey("-p");
 
             // estrazione chiavi-valori
             string? regexPattern = options.TryGetValue("--regex", out var r) && r != "true" ? r : null;
@@ -50,6 +52,20 @@ namespace swiss.plugins.eliminator
             }
 
             string dateType = options.TryGetValue("--date-type", out var dt) && dt != "true" ? dt.ToLower() : "m";
+
+            // default 1 quindi no multithread
+            int threads = 1;
+            options.TryGetValue("--threads", out var thStr);
+            if (!String.IsNullOrEmpty(thStr) && int.TryParse(thStr, out var thInt) && thInt > 0 && thInt < 64)
+            {
+                threads = thInt;
+                isParallel = true;
+            }
+            else if (isParallel)
+            {
+                // se è attivo il parallelismo ma non è stato definito il numero di threads
+                threads = Environment.ProcessorCount;
+            }
 
             // ---------------------------------------------------------
             // 2. LOGICA DI ROLLBACK
@@ -84,7 +100,6 @@ namespace swiss.plugins.eliminator
                 }
             }
 
-            // calcolo la data 1 volta sola
             if (olderThanDays.HasValue)
             {
                 DateTime cutoffDate = DateTime.Now.AddDays(-olderThanDays.Value);
@@ -152,71 +167,79 @@ namespace swiss.plugins.eliminator
                 RecurseSubdirectories = isRecursive,
                 BufferSize = 64 * 1024
             };
+            IEnumerable<FileSystemInfo> itemsToScan = targetDirs
+                ? new DirectoryInfo(targetPath).EnumerateDirectories("*", enumOptions)
+                : new DirectoryInfo(targetPath).EnumerateFiles("*", enumOptions);
+
+            var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000) { SingleReader = true });
+            Task? consumerTask = null;
+
+            if (csvWriter != null)
+            {
+                consumerTask = Task.Run(async () =>
+                {
+                    await foreach (var line in channel.Reader.ReadAllAsync(ct))
+                    {
+                        await csvWriter.WriteLineAsync(line);
+                    }
+                });
+            }
 
             try
             {
-                IEnumerable<FileSystemInfo> itemsToScan = targetDirs
-                    ? new DirectoryInfo(targetPath).EnumerateDirectories("*", enumOptions)
-                    : new DirectoryInfo(targetPath).EnumerateFiles("*", enumOptions);
-
-                foreach (var item in itemsToScan)
+                // FOREACH PARALLELO
+                if (isParallel && threads > 1)
                 {
-                    ct.ThrowIfCancellationRequested();
-                    processedCount++;
-
-                    if (processedCount % 25000 == 0) Console.Write($"\rFile analizzati: {processedCount}...");
-
-                    if (!shouldProcess(item)) continue;
-
-                    actionCount++;
-                    // per le cartelle non stiamo a calcolare la dimensione
-                    long itemSize = item is FileInfo f ? f.Length : 0;
-                    bytesSaved += itemSize;
-
-                    if (isDebug)
+                    ParallelOptions parallelOptions = new()
                     {
-                        Console.WriteLine($"\r[DEBUG] {(targetDirs ? "DIR " : "FILE")}: {item.FullName}");
-                        continue;
-                    }
-
-                    try
+                        MaxDegreeOfParallelism = threads,
+                        CancellationToken = ct
+                    };
+                    await Parallel.ForEachAsync(itemsToScan, parallelOptions, async (item, token) =>
                     {
-                        if (!string.IsNullOrEmpty(backupPath))
+                        long currentProcessed = Interlocked.Increment(ref processedCount);
+                        if (currentProcessed % 25000 == 0) Console.Write($"\rElementi analizzati: {currentProcessed}...");
+
+                        if (!shouldProcess(item)) return;
+
+                        long size = await ExecuteItemActionAsync(item, backupPath, targetDirs, isDebug, channel.Writer);
+
+                        if (size >= 0)
                         {
-                            // BACKUP
-                            string destItem = Path.Combine(backupPath, item.Name);
-
-                            if (targetDirs ? Directory.Exists(destItem) : File.Exists(destItem))
-                            {
-                                string ext = item.Extension;
-                                string nameOnly = Path.GetFileNameWithoutExtension(item.Name);
-                                destItem = Path.Combine(backupPath, $"{nameOnly}_{Guid.NewGuid().ToString("N")[..8]}{ext}");
-                            }
-
-                            string currentFilePath = item.FullName;
-
-                            if (item is DirectoryInfo d) d.MoveTo(destItem);
-                            else if (item is FileInfo fi) fi.MoveTo(destItem);
-
-                            await csvWriter!.WriteLineAsync($"{currentFilePath};{destItem};{itemSize};{DateTime.Now:O}");
+                            Interlocked.Increment(ref actionCount);
+                            Interlocked.Add(ref bytesSaved, size);
                         }
-                        else
-                        {
-                            // ELIMINAZIONE
-                            if (item is DirectoryInfo d) d.Delete(recursive: true);
-                            else if (item is FileInfo fi) fi.Delete();
-                        }
-                    }
-                    catch (Exception ex)
+                    });
+                }
+                // FOREACH SEQUENZIALE
+                else
+                {
+                    foreach (var item in itemsToScan)
                     {
-                        // Errore sul singolo file: logghiamo e proseguiamo (zero crash inaspettati)
-                        Console.WriteLine($"\rErrore su {item.Name}: {ex.Message}");
+                        ct.ThrowIfCancellationRequested();
+                        processedCount++;
+                        if (processedCount % 25000 == 0) Console.Write($"\rElementi analizzati: {processedCount}...");
+
+                        if (!shouldProcess(item)) continue;
+
+                        long size = await ExecuteItemActionAsync(item, backupPath, targetDirs, isDebug, channel.Writer);
+
+                        if (size >= 0)
+                        {
+                            actionCount++;
+                            bytesSaved += size;
+                        }
                     }
                 }
             }
             catch (OperationCanceledException) { Console.WriteLine("\nOperazione interrotta dall'utente."); }
             finally
             {
+                channel.Writer.Complete();
+                if (consumerTask != null)
+                {
+                    await consumerTask;
+                }
                 if (csvWriter != null)
                 {
                     await csvWriter.FlushAsync();
@@ -231,6 +254,52 @@ namespace swiss.plugins.eliminator
             Console.WriteLine($"- File colpiti    : {actionCount}");
             Console.WriteLine($"- Spazio coinvolto: {Formatter.Bytes(bytesSaved)}");
             Console.ResetColor();
+        }
+
+        private async Task<long> ExecuteItemActionAsync(FileSystemInfo item, string? backupPath, bool targetDirs, bool isDebug, ChannelWriter<string>? logWriter)
+        {
+            long itemSize = item switch { FileInfo f => f.Length, _ => 0 };
+
+            if (isDebug)
+            {
+                Console.WriteLine($"[DEBUG] {(targetDirs ? "DIR " : "FILE")}: {item.FullName}");
+                return itemSize;
+            }
+
+            try
+            {
+                if (!string.IsNullOrEmpty(backupPath))
+                {
+                    // BACKUP
+                    string destItem = Path.Combine(backupPath, item.Name);
+                    if (targetDirs ? Directory.Exists(destItem) : File.Exists(destItem))
+                    {
+                        string ext = item.Extension;
+                        string nameOnly = Path.GetFileNameWithoutExtension(item.Name);
+                        destItem = Path.Combine(backupPath, $"{nameOnly}_{Guid.NewGuid().ToString("N")[..8]}{ext}");
+                    }
+
+                    string currentFilePath = item.FullName;
+
+                    if (item is DirectoryInfo d) d.MoveTo(destItem);
+                    else if (item is FileInfo fi) fi.MoveTo(destItem);
+
+                    logWriter?.TryWrite($"{currentFilePath};{destItem};{itemSize};{DateTime.Now:O}");
+                }
+                else
+                {
+                    // ELIMINAZIONE
+                    if (item is DirectoryInfo d) d.Delete(recursive: true);
+                    else if (item is FileInfo fi) fi.Delete();
+                }
+
+                return itemSize;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"\rErrore su {item.Name}: {ex.Message}");
+                return -1; // -1 indica errore, così non incrementiamo i contatori
+            }
         }
 
         private async Task<bool> Rollback(string targetPath, bool isDebug, CancellationToken ct)
@@ -324,6 +393,8 @@ namespace swiss.plugins.eliminator
             Console.WriteLine("  --recursive, -r       : Scansiona anche le sottocartelle");
             Console.WriteLine("  --force, -f, -y       : Procedi senza chiedere nessuna conferma di esecuzione");
             Console.WriteLine("  --dirs                : Applica i filtri e le operazioni alle CARTELLE anziché ai file");
+            Console.WriteLine("  --parallel, -p        : Esegue l'operazione in multithreading");
+            Console.WriteLine("  --threads, -t <num>   : Specifica il numero massimo di thread (default: numero di core della CPU)");
         }
     }
 }
