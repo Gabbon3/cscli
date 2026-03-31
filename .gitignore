@@ -1,0 +1,7 @@
+test/
+.vscode/
+.vs/
+swiss/bin/
+swiss/obj/
+swiss/Properties/
+
