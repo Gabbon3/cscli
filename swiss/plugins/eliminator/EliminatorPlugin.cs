@@ -35,19 +35,6 @@ namespace swiss.plugins.eliminator
             }
         }
 
-        private struct ThreadLocalState
-        {
-            public long Processed { get; set; }
-            public long Actions { get; set; }
-            public long BytesSaved { get; set; }
-            public ThreadLocalState()
-            {
-                Processed = 0;
-                Actions = 0;
-                BytesSaved = 0;
-            }
-        }
-
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
             if (args.Length < 1)
@@ -123,7 +110,7 @@ namespace swiss.plugins.eliminator
             {
                 try
                 {
-                    var regexOptions = RegexOptions.Compiled;
+                    var regexOptions = RegexOptions.Compiled | RegexOptions.NonBacktracking;
                     if (regexIgnoreCase)
                     {
                         regexOptions |= RegexOptions.IgnoreCase;
@@ -212,61 +199,74 @@ namespace swiss.plugins.eliminator
                 enumOptions
             );
 
-            var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000) { SingleReader = true });
-            Task? consumerTask = null;
+            var logChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000) { SingleReader = true });
+            Task? logConsumerTask = null;
 
             if (csvWriter != null)
             {
-                consumerTask = Task.Run(async () =>
+                logConsumerTask = Task.Run(async () =>
                 {
-                    await foreach (var line in channel.Reader.ReadAllAsync(ct))
+                    await foreach (var line in logChannel.Reader.ReadAllAsync(ct))
                     {
                         await csvWriter.WriteLineAsync(line);
                     }
                 });
             }
 
+            var workChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(50000)
+            {
+                SingleWriter = true,
+                SingleReader = false
+            });
+
             try
             {
                 // FOREACH PARALLELO
                 if (isParallel && threads > 1)
                 {
-                    ParallelOptions parallelOptions = new()
+                    // Avvio il producer di file in background
+                    var producerTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            foreach (var item in itemsToScan)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                await workChannel.Writer.WriteAsync(item, ct);
+                            }
+                        }
+                        catch (OperationCanceledException) { }
+                        catch (Exception ex) { PrintError($"\n[Errore I/O]: {ex.Message}"); }
+                        finally
+                        {
+                            workChannel.Writer.Complete();
+                        }
+                    }, ct);
+                    
+                    var parallelOptions = new ParallelOptions
                     {
                         MaxDegreeOfParallelism = threads,
                         CancellationToken = ct
                     };
-                    // foreach sincrono multithread
-                    Parallel.ForEach(
-                        itemsToScan,
+
+                    await Parallel.ForEachAsync(
+                        workChannel.Reader.ReadAllAsync(ct),
                         parallelOptions,
-                        // struct mutabile per gestire le variabili locali di ogni thread
-                        () => new ThreadLocalState(),
-                        // esecuzione principale del thread
-                        (item, loopState, localState) =>
+                        async (item, token) =>
                         {
-                            localState.Processed++;
+                            long currentProcessed = Interlocked.Increment(ref processedCount);
+                            // if (currentProcessed % 25000 == 0) Console.Write($"\rElementi analizzati: {currentProcessed}...");
 
-                            if (!shouldProcess(item)) return localState;
+                            if (!shouldProcess(item)) return;
 
-                            long size = ExecuteItemAction(item, backupPath, isDebug, channel.Writer);
+                            long size = ExecuteItemAction(item, backupPath, isDebug, logChannel.Writer);
 
                             if (size >= 0)
                             {
-                                localState.Actions++;
-                                localState.BytesSaved += size;
+                                Interlocked.Increment(ref actionCount);
+                                Interlocked.Add(ref bytesSaved, size);
                             }
-
-                            return localState;
-                        },
-                        // esecuzione finale prima di chiudere il thread
-                        (finalState) =>
-                        {
-                            Interlocked.Add(ref actionCount, finalState.Actions);
-                            Interlocked.Add(ref processedCount, finalState.Processed);
-                            Interlocked.Add(ref bytesSaved, finalState.BytesSaved);
-                        }
-                    );
+                        });
                 }
                 // FOREACH SEQUENZIALE
                 else
@@ -279,7 +279,7 @@ namespace swiss.plugins.eliminator
 
                         if (!shouldProcess(item)) continue;
 
-                        long size = ExecuteItemAction(item, backupPath, isDebug, channel.Writer);
+                        long size = ExecuteItemAction(item, backupPath, isDebug, logChannel.Writer);
 
                         if (size >= 0)
                         {
@@ -292,11 +292,8 @@ namespace swiss.plugins.eliminator
             catch (OperationCanceledException) { Console.WriteLine("\nOperazione interrotta dall'utente."); }
             finally
             {
-                channel.Writer.Complete();
-                if (consumerTask != null)
-                {
-                    await consumerTask;
-                }
+                logChannel.Writer.Complete();
+                if (logConsumerTask != null) await logConsumerTask;
                 if (csvWriter != null)
                 {
                     await csvWriter.FlushAsync();

@@ -11,8 +11,8 @@ using swiss.plugins.eliminator;
 // cancellation token
 using var cts = new CancellationTokenSource();
 
-const string version = "1.5.62";
-const string versionDescription = "eliminator plugin - --dirs aggiunto per cancellare anziche i file, le cartelle";
+const string version = "1.6.0";
+const string versionDescription = "eliminator plugin - ottimizzazione avanzata multithreading";
 
 Console.CancelKeyPress += (sender, e) =>
 {
@@ -104,7 +104,7 @@ if (plugin != null)
         long peakMemory = currentProcess.PeakWorkingSet64;
         long endGcMemory = GC.GetTotalMemory(false);
 
-        // PrintStatistics(elapsed, cpuUsed, peakMemory, endGcMemory - startGcMemory);
+        PrintStatistics(elapsed, cpuUsed, peakMemory, endGcMemory - startGcMemory);
     }
 }
 else
@@ -135,37 +135,37 @@ static void VersionInfo()
     Console.ResetColor();
 }
 
-// static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryBytes, long gcMemoryDiff)
-// {
-//     Console.WriteLine();
-//     Console.WriteLine("------------------------------------------------");
-//     Console.WriteLine("STATISTICHE ESECUZIONE");
-//     Console.WriteLine("------------------------------------------------");
+static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryBytes, long gcMemoryDiff)
+{
+    Console.WriteLine();
+    Console.WriteLine("------------------------------------------------");
+    Console.WriteLine("STATISTICHE ESECUZIONE");
+    Console.WriteLine("------------------------------------------------");
 
-//     // tempo reale (wall clock)
-//     Console.Write("Tempo Totale:      ");
-//     PrintColoredValue($"{elapsed.TotalSeconds:N4} s", ConsoleColor.Cyan);
+    // tempo reale (wall clock)
+    Console.Write("Tempo Totale:      ");
+    PrintColoredValue($"{elapsed.TotalSeconds:N4} s", ConsoleColor.Cyan);
 
-//     // tempo cpu (somma di tutti i core)
-//     Console.Write("Tempo CPU:         ");
-//     double cpuRatio = elapsed.TotalMilliseconds > 0 ? cpuTime.TotalMilliseconds / elapsed.TotalMilliseconds : 0;
-//     PrintColoredValue($"{cpuTime.TotalSeconds:N4} s (avg {cpuRatio:N1}x core)", ConsoleColor.Yellow);
+    // tempo cpu (somma di tutti i core)
+    Console.Write("Tempo CPU:         ");
+    double cpuRatio = elapsed.TotalMilliseconds > 0 ? cpuTime.TotalMilliseconds / elapsed.TotalMilliseconds : 0;
+    PrintColoredValue($"{cpuTime.TotalSeconds:N4} s (avg {cpuRatio:N1}x core)", ConsoleColor.Yellow);
 
-//     // memoria fisica (RAM)
-//     Console.Write("RAM Picco (Phys):  ");
-//     PrintColoredValue($"{peakMemoryBytes / 1024.0 / 1024.0:N2} MB", ConsoleColor.Magenta);
+    // memoria fisica (RAM)
+    Console.Write("RAM Picco (Phys):  ");
+    PrintColoredValue($"{peakMemoryBytes / 1024.0 / 1024.0:N2} MB", ConsoleColor.Magenta);
 
-//     // memoria managed (GC)
-//     Console.Write("GC Alloc (Delta):  ");
-//     string sign = gcMemoryDiff >= 0 ? "+" : "";
-//     PrintColoredValue($"{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB", ConsoleColor.Gray);
+    // memoria managed (GC)
+    Console.Write("GC Alloc (Delta):  ");
+    string sign = gcMemoryDiff >= 0 ? "+" : "";
+    PrintColoredValue($"{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB", ConsoleColor.Gray);
 
-//     Console.WriteLine("------------------------------------------------");
-// }
+    Console.WriteLine("------------------------------------------------");
+}
 
-// static void PrintColoredValue(string value, ConsoleColor color)
-// {
-//     Console.ForegroundColor = color;
-//     Console.WriteLine(value);
-//     Console.ResetColor();
-// }
+static void PrintColoredValue(string value, ConsoleColor color)
+{
+    Console.ForegroundColor = color;
+    Console.WriteLine(value);
+    Console.ResetColor();
+}
