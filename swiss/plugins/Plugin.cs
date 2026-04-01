@@ -40,11 +40,21 @@ namespace plugins
 
         public abstract void Help();
 
+        public void PrintWarning(string message)
+        {
+            lock (_printErrorLock)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"{Name} WARNING: {message}");
+                Console.ResetColor();
+            }
+        }
+
         public void PrintError(string message)
         {
             lock (_printErrorLock)
             {
-                Console.ForegroundColor = ConsoleColor.Green;
+                Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"{Name} ERROR: {message}");
                 Console.ResetColor();
             }

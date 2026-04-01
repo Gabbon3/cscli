@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.IO.Enumeration;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using plugins;
 using utils;
@@ -9,6 +10,43 @@ namespace swiss.plugins.eliminator
     {
         public override string Name => "eliminator";
         public override string Description => "Tool avanzato per la cancellazione e l'archiviazione massiva dei file";
+
+        private readonly struct StackFileInfo
+        {
+            public string Name { get; }
+            public string FullName { get; }
+            public string Extension { get; }
+            public DateTime CreationTime { get; }
+            public DateTime LastAccessTime { get; }
+            public DateTime LastWriteTime { get; }
+            public long Length { get; }
+            public bool IsDirectory { get; }
+
+            public StackFileInfo(ref FileSystemEntry entry)
+            {
+                Name = entry.FileName.ToString();
+                FullName = entry.ToFullPath();
+                Extension = Path.GetExtension(Name);
+                CreationTime = entry.CreationTimeUtc.LocalDateTime;
+                LastAccessTime = entry.LastAccessTimeUtc.LocalDateTime;
+                LastWriteTime = entry.LastWriteTimeUtc.LocalDateTime;
+                Length = entry.Length;
+                IsDirectory = entry.IsDirectory;
+            }
+        }
+
+        private struct ThreadLocalState
+        {
+            public long Processed { get; set; }
+            public long Actions { get; set; }
+            public long BytesSaved { get; set; }
+            public ThreadLocalState()
+            {
+                Processed = 0;
+                Actions = 0;
+                BytesSaved = 0;
+            }
+        }
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
@@ -79,7 +117,7 @@ namespace swiss.plugins.eliminator
             // ---------------------------------------------------------
             // 3. FILTRI
             // ---------------------------------------------------------
-            var filters = new List<Func<FileSystemInfo, bool>>();
+            var filters = new List<Func<StackFileInfo, bool>>();
 
             if (!string.IsNullOrEmpty(regexPattern))
             {
@@ -114,7 +152,7 @@ namespace swiss.plugins.eliminator
             }
 
             // preparo il filtro per i dati
-            Func<FileSystemInfo, bool> shouldProcess = file => filters.All(f => f(file));
+            Func<StackFileInfo, bool> shouldProcess = file => filters.All(f => f(file));
 
             // ---------------------------------------------------------
             // 4. BACKUP
@@ -157,7 +195,7 @@ namespace swiss.plugins.eliminator
             // ---------------------------------------------------------
             // 5. ESECUZIONE PRINCIPALE
             // ---------------------------------------------------------
-            Console.WriteLine(isDebug ? "\n--- AVVIO (DEBUG) ---" : "\n--- AVVIO ---");
+            Console.WriteLine(isDebug ? "--- AVVIO (DEBUG) ---" : "--- AVVIO ---");
 
             long processedCount = 0, actionCount = 0, bytesSaved = 0;
 
@@ -167,9 +205,12 @@ namespace swiss.plugins.eliminator
                 RecurseSubdirectories = isRecursive,
                 BufferSize = 64 * 1024
             };
-            IEnumerable<FileSystemInfo> itemsToScan = targetDirs
-                ? new DirectoryInfo(targetPath).EnumerateDirectories("*", enumOptions)
-                : new DirectoryInfo(targetPath).EnumerateFiles("*", enumOptions);
+
+            IEnumerable<StackFileInfo> itemsToScan = new FileSystemEnumerable<StackFileInfo>(
+                targetPath,
+                (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
+                enumOptions
+            );
 
             var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000) { SingleReader = true });
             Task? consumerTask = null;
@@ -195,21 +236,37 @@ namespace swiss.plugins.eliminator
                         MaxDegreeOfParallelism = threads,
                         CancellationToken = ct
                     };
-                    await Parallel.ForEachAsync(itemsToScan, parallelOptions, async (item, token) =>
-                    {
-                        long currentProcessed = Interlocked.Increment(ref processedCount);
-                        if (currentProcessed % 25000 == 0) Console.Write($"\rElementi analizzati: {currentProcessed}...");
-
-                        if (!shouldProcess(item)) return;
-
-                        long size = await ExecuteItemActionAsync(item, backupPath, targetDirs, isDebug, channel.Writer);
-
-                        if (size >= 0)
+                    // foreach sincrono multithread
+                    Parallel.ForEach(
+                        itemsToScan,
+                        parallelOptions,
+                        // struct mutabile per gestire le variabili locali di ogni thread
+                        () => new ThreadLocalState(),
+                        // esecuzione principale del thread
+                        (item, loopState, localState) =>
                         {
-                            Interlocked.Increment(ref actionCount);
-                            Interlocked.Add(ref bytesSaved, size);
+                            localState.Processed++;
+
+                            if (!shouldProcess(item)) return localState;
+
+                            long size = ExecuteItemAction(item, backupPath, isDebug, channel.Writer);
+
+                            if (size >= 0)
+                            {
+                                localState.Actions++;
+                                localState.BytesSaved += size;
+                            }
+
+                            return localState;
+                        },
+                        // esecuzione finale prima di chiudere il thread
+                        (finalState) =>
+                        {
+                            Interlocked.Add(ref actionCount, finalState.Actions);
+                            Interlocked.Add(ref processedCount, finalState.Processed);
+                            Interlocked.Add(ref bytesSaved, finalState.BytesSaved);
                         }
-                    });
+                    );
                 }
                 // FOREACH SEQUENZIALE
                 else
@@ -222,7 +279,7 @@ namespace swiss.plugins.eliminator
 
                         if (!shouldProcess(item)) continue;
 
-                        long size = await ExecuteItemActionAsync(item, backupPath, targetDirs, isDebug, channel.Writer);
+                        long size = ExecuteItemAction(item, backupPath, isDebug, channel.Writer);
 
                         if (size >= 0)
                         {
@@ -256,13 +313,13 @@ namespace swiss.plugins.eliminator
             Console.ResetColor();
         }
 
-        private async Task<long> ExecuteItemActionAsync(FileSystemInfo item, string? backupPath, bool targetDirs, bool isDebug, ChannelWriter<string>? logWriter)
+        private long ExecuteItemAction(StackFileInfo item, string? backupPath, bool isDebug, ChannelWriter<string>? logWriter)
         {
-            long itemSize = item switch { FileInfo f => f.Length, _ => 0 };
+            long itemSize = item.IsDirectory ? 0 : item.Length;
 
             if (isDebug)
             {
-                Console.WriteLine($"[DEBUG] {(targetDirs ? "DIR " : "FILE")}: {item.FullName}");
+                Console.WriteLine($"[DEBUG] {(item.IsDirectory ? "DIR " : "FILE")}: {item.FullName}");
                 return itemSize;
             }
 
@@ -272,33 +329,35 @@ namespace swiss.plugins.eliminator
                 {
                     // BACKUP
                     string destItem = Path.Combine(backupPath, item.Name);
-                    if (targetDirs ? Directory.Exists(destItem) : File.Exists(destItem))
+                    if (item.IsDirectory ? Directory.Exists(destItem) : File.Exists(destItem))
                     {
                         string ext = item.Extension;
                         string nameOnly = Path.GetFileNameWithoutExtension(item.Name);
                         destItem = Path.Combine(backupPath, $"{nameOnly}_{Guid.NewGuid().ToString("N")[..8]}{ext}");
                     }
 
-                    string currentFilePath = item.FullName;
+                    if (item.IsDirectory) Directory.Move(item.FullName, destItem);
+                    else File.Move(item.FullName, destItem);
 
-                    if (item is DirectoryInfo d) d.MoveTo(destItem);
-                    else if (item is FileInfo fi) fi.MoveTo(destItem);
-
-                    logWriter?.TryWrite($"{currentFilePath};{destItem};{itemSize};{DateTime.Now:O}");
+                    logWriter?.TryWrite($"{item.FullName};{destItem};{itemSize};{DateTime.Now:O}");
                 }
                 else
                 {
                     // ELIMINAZIONE
-                    if (item is DirectoryInfo d) d.Delete(recursive: true);
-                    else if (item is FileInfo fi) fi.Delete();
+                    if (item.IsDirectory) Directory.Delete(item.FullName, recursive: true);
+                    else
+                    {
+                        bool success = NativeIO.DeleteFile(item.FullName);
+                        if (!success) PrintWarning($"Impossibile cancellare {item.FullName}");
+                    }
                 }
 
                 return itemSize;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\rErrore su {item.Name}: {ex.Message}");
-                return -1; // -1 indica errore, così non incrementiamo i contatori
+                PrintError($"eccezione su {item.Name}: {ex.Message}");
+                return -1; // -1 indica errore
             }
         }
 
@@ -312,7 +371,7 @@ namespace swiss.plugins.eliminator
                 return false;
             }
 
-            Console.WriteLine(isDebug ? "\n--- AVVIO ROLLBACK (DEBUG) ---" : "\n--- AVVIO ROLLBACK ---");
+            Console.WriteLine(isDebug ? "--- AVVIO ROLLBACK (DEBUG) ---" : "--- AVVIO ROLLBACK ---");
 
             long restoredCount = 0, failedCount = 0;
 
