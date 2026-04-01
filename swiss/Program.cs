@@ -11,8 +11,8 @@ using swiss.plugins.eliminator;
 // cancellation token
 using var cts = new CancellationTokenSource();
 
-const string version = "1.6.0";
-const string versionDescription = "eliminator plugin - ottimizzazione avanzata multithreading";
+const string version = "1.7.0";
+const string versionDescription = "filewalker util - walker del file system parallelo";
 
 Console.CancelKeyPress += (sender, e) =>
 {

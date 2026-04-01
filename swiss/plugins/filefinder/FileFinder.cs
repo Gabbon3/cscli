@@ -1,29 +1,19 @@
 using System.Text.RegularExpressions;
-using System.Threading.Channels;
+using System.Buffers;
+using utils;
 
 namespace plugins.filefinder
 {
     class FileFinder : Plugin
     {
         public override string Name => "find";
-        public override string Description => "ricerca uno o piu file tramite un pattern regex";
-        private readonly Channel<string> _channel;
-        // lock per la console per non mescolare colori della stampa MATCH
-        private static readonly object _consoleLock = new();
+        public override string Description => "Ricerca tramite Regex di file";
 
-        public FileFinder()
-        {
-            _channel = Channel.CreateBounded<string>(new BoundedChannelOptions(1000)
-            {
-                SingleWriter = true,
-                SingleReader = false,
-                FullMode = BoundedChannelFullMode.Wait
-            });
-        }
+        private static readonly object _consoleLock = new();
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 2 || String.Equals(args[0], "help"))
+            if (args.Length < 2 || string.Equals(args[0], "help"))
             {
                 Help();
                 return;
@@ -32,105 +22,103 @@ namespace plugins.filefinder
             string root = args[0];
             string pattern = args[1];
 
-            if (!Directory.Exists(root))
+            if (root == ".")
+            {
+                root = Directory.GetCurrentDirectory();
+            }
+            else if (!Directory.Exists(root))
             {
                 Console.WriteLine($"Errore: il percorso \"{root}\" non esiste");
                 return;
             }
 
-            Console.WriteLine($"Ricerca di \"{pattern}\" in \"{root}\" ");
-
-            // compilo la regex per maggiore efficienza
-            var regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-            var producerTask = ProducerAsync(root, ct);
-
-            int workerCount = Math.Max(1, Environment.ProcessorCount - 1);
-            var workerTasks = new Task[workerCount];
-
-            for (int i = 0; i < workerCount; i++)
+            Regex? regex = null;
+            if (!string.IsNullOrEmpty(pattern))
             {
-                workerTasks[i] = WorkerAsync(regex, ct);
-            }
-
-            await producerTask;
-
-            await Task.WhenAll(workerTasks);
-        }
-
-        /// <summary>
-        /// Producer scansiona il file system e pusha man mano le cartelle da far analizzare ai worker
-        /// </summary>
-        /// <param name="root">path da cui iniziare la scansione</param>
-        private async Task ProducerAsync(string root, CancellationToken ct)
-        {
-            try
-            {
-                var options = new EnumerationOptions
+                try
                 {
-                    IgnoreInaccessible = true,
-                    RecurseSubdirectories = true,
-                    BufferSize = 65536
-                };
-                foreach (var file in Directory.EnumerateFiles(root, "*", options))
+                    regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                }
+                catch (Exception)
                 {
-                    if (ct.IsCancellationRequested) break;
-                    await _channel.Writer.WriteAsync(file);
+                    PrintError("la regex inserita non è valida");
+                    return;
                 }
             }
-            catch (OperationCanceledException)
-            {
-                // Operazione annullata dall'utente
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Errore del producer: ${ex.Message}");
-            }
-            finally
-            {
-                _channel.Writer.Complete();
-            }
-        }
 
-        private async Task WorkerAsync(Regex regex, CancellationToken ct)
-        {
-            try
+            var options = new EnumerationOptions
             {
-                await foreach (var file in _channel.Reader.ReadAllAsync(ct))
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = true,
+                BufferSize = 64 * 1024
+            };
+            // avvio il walker
+            var walkerReader = FastWalker.Walk<StackFileInfo>(
+                root,
+                options,
+                (ref System.IO.Enumeration.FileSystemEntry entry) => new StackFileInfo(ref entry),
+                maxDegreeOfParallelism: Environment.ProcessorCount,
+                SingleReader: false,
+                ct
+            );
+            // avvio i consumer
+            int matchCount = 0;
+            await Parallel.ForEachAsync(
+                walkerReader.ReadAllAsync(ct),
+                new ParallelOptions
                 {
-                    if (regex.IsMatch(Path.GetFileName(file)))
+                    MaxDegreeOfParallelism = Environment.ProcessorCount,
+                    CancellationToken = ct
+                },
+                async (item, token) =>
+                {
+                    try
                     {
-                        PrintMatch(file);
+                        if (regex == null || regex.IsMatch(item.AsNameSpan()))
+                        {
+                            Interlocked.Increment(ref matchCount);
+                            PrintMatch(item.GetFullPath());
+                        }
+                    }
+                    finally
+                    {
+                        // libero l'ArrayPool
+                        if (item.PathBuffer != null)
+                            ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
                     }
                 }
-            }
-            catch (OperationCanceledException)
+            );
+        }
+
+        private static void PrintMatch(string path)
+        {
+            int lastSeparator = path.LastIndexOf(Path.DirectorySeparatorChar);
+            if (lastSeparator == -1)
             {
-                // operazione annullata dall utente
+                Console.WriteLine(path);
+                return;
             }
-            catch (Exception ex)
+
+            string directory = path[..(lastSeparator + 1)];
+            string fileName = path[(lastSeparator + 1)..];
+
+            lock (_consoleLock)
             {
-                PrintError(ex.Message);
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.Write(directory);
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine(fileName);
+                Console.ResetColor();
             }
         }
 
         public override void Help()
         {
             Console.WriteLine("--------------------------------");
-            Console.WriteLine("Come utilizzare il comando find:");
-            Console.WriteLine("swiss find percorso nome_file");
-            Console.WriteLine(" - percorso -> path da cui iniziare la ricerca ricorsiva");
-            Console.WriteLine(" - nome_file -> pattern regex del nome file da ricercare");
+            Console.WriteLine("Utilizzo: swiss find <percorso> <regex>");
+            Console.WriteLine(" - swiss find C:\\Users\\ \".*\\.pdf\"");
+            Console.WriteLine(" - swiss find . \"\"");
             Console.WriteLine("--------------------------------");
-        }
-        private static void PrintMatch(string fileName)
-        {
-            lock (_consoleLock)
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"{fileName}");
-                Console.ResetColor();
-            }
         }
     }
 }

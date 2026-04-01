@@ -1,4 +1,5 @@
-﻿using System.IO.Enumeration;
+﻿using System.Buffers;
+using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using plugins;
@@ -10,30 +11,6 @@ namespace swiss.plugins.eliminator
     {
         public override string Name => "eliminator";
         public override string Description => "Tool avanzato per la cancellazione e l'archiviazione massiva dei file";
-
-        private readonly struct StackFileInfo
-        {
-            public string Name { get; }
-            public string FullName { get; }
-            public string Extension { get; }
-            public DateTime CreationTime { get; }
-            public DateTime LastAccessTime { get; }
-            public DateTime LastWriteTime { get; }
-            public long Length { get; }
-            public bool IsDirectory { get; }
-
-            public StackFileInfo(ref FileSystemEntry entry)
-            {
-                Name = entry.FileName.ToString();
-                FullName = entry.ToFullPath();
-                Extension = Path.GetExtension(Name);
-                CreationTime = entry.CreationTimeUtc.LocalDateTime;
-                LastAccessTime = entry.LastAccessTimeUtc.LocalDateTime;
-                LastWriteTime = entry.LastWriteTimeUtc.LocalDateTime;
-                Length = entry.Length;
-                IsDirectory = entry.IsDirectory;
-            }
-        }
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
@@ -116,7 +93,12 @@ namespace swiss.plugins.eliminator
                         regexOptions |= RegexOptions.IgnoreCase;
                     }
                     var compiledRegex = new Regex(regexPattern, regexOptions);
-                    filters.Add(info => compiledRegex.IsMatch(info.Name));
+                    filters.Add(info =>
+                    {
+                        // estraggo lo span del nome file direttamente
+                        var nameSpan = info.PathBuffer.AsSpan(info.PathLength - info.NameLength, info.NameLength);
+                        return compiledRegex.IsMatch(nameSpan);
+                    });
                 }
                 catch (ArgumentException ex)
                 {
@@ -128,18 +110,16 @@ namespace swiss.plugins.eliminator
             if (olderThanDays.HasValue)
             {
                 DateTime cutoffDate = DateTime.Now.AddDays(-olderThanDays.Value);
-
-                // regola di filtro sul tipo di data
                 filters.Add(dateType switch
                 {
                     "c" => file => file.CreationTime < cutoffDate,
                     "a" => file => file.LastAccessTime < cutoffDate,
-                    _ => file => file.LastWriteTime < cutoffDate // Default: Modifica
+                    _ => file => file.LastWriteTime < cutoffDate // default: m
                 });
             }
 
             // preparo il filtro per i dati
-            Func<StackFileInfo, bool> shouldProcess = file => filters.All(f => f(file));
+            bool shouldProcess(StackFileInfo file) => filters.All(f => f(file));
 
             // ---------------------------------------------------------
             // 4. BACKUP
@@ -242,7 +222,7 @@ namespace swiss.plugins.eliminator
                             workChannel.Writer.Complete();
                         }
                     }, ct);
-                    
+
                     var parallelOptions = new ParallelOptions
                     {
                         MaxDegreeOfParallelism = threads,
@@ -254,17 +234,27 @@ namespace swiss.plugins.eliminator
                         parallelOptions,
                         async (item, token) =>
                         {
-                            long currentProcessed = Interlocked.Increment(ref processedCount);
-                            // if (currentProcessed % 25000 == 0) Console.Write($"\rElementi analizzati: {currentProcessed}...");
-
-                            if (!shouldProcess(item)) return;
-
-                            long size = ExecuteItemAction(item, backupPath, isDebug, logChannel.Writer);
-
-                            if (size >= 0)
+                            try
                             {
-                                Interlocked.Increment(ref actionCount);
-                                Interlocked.Add(ref bytesSaved, size);
+                                long currentProcessed = Interlocked.Increment(ref processedCount);
+                                // filtro il file
+                                if (!shouldProcess(item)) return;
+                                // calcolo la stringa solo dopo aver filtrato
+                                string finalPath = new(item.PathBuffer, 0, item.PathLength);
+                                long size = ExecuteItemAction(finalPath, item, backupPath, isDebug, logChannel.Writer);
+
+                                if (size >= 0)
+                                {
+                                    Interlocked.Increment(ref actionCount);
+                                    Interlocked.Add(ref bytesSaved, size);
+                                }
+                            }
+                            finally
+                            {
+                                if (item.PathBuffer != null)
+                                {
+                                    ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
+                                }
                             }
                         });
                 }
@@ -273,18 +263,29 @@ namespace swiss.plugins.eliminator
                 {
                     foreach (var item in itemsToScan)
                     {
-                        ct.ThrowIfCancellationRequested();
-                        processedCount++;
-                        if (processedCount % 25000 == 0) Console.Write($"\rElementi analizzati: {processedCount}...");
-
-                        if (!shouldProcess(item)) continue;
-
-                        long size = ExecuteItemAction(item, backupPath, isDebug, logChannel.Writer);
-
-                        if (size >= 0)
+                        try
                         {
-                            actionCount++;
-                            bytesSaved += size;
+                            ct.ThrowIfCancellationRequested();
+                            processedCount++;
+                            if (processedCount % 25000 == 0) Console.Write($"\rElementi analizzati: {processedCount}...");
+
+                            if (!shouldProcess(item)) continue;
+
+                            string finalPath = new(item.PathBuffer, 0, item.PathLength);
+                            long size = ExecuteItemAction(finalPath, item, backupPath, isDebug, logChannel.Writer);
+
+                            if (size >= 0)
+                            {
+                                actionCount++;
+                                bytesSaved += size;
+                            }
+                        }
+                        finally
+                        {
+                            if (item.PathBuffer != null)
+                            {
+                                ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
+                            }
                         }
                     }
                 }
@@ -310,13 +311,14 @@ namespace swiss.plugins.eliminator
             Console.ResetColor();
         }
 
-        private long ExecuteItemAction(StackFileInfo item, string? backupPath, bool isDebug, ChannelWriter<string>? logWriter)
+        // Modifichiamo la firma per accettare il 'fullPath' pre-calcolato
+        private long ExecuteItemAction(string fullPath, StackFileInfo item, string? backupPath, bool isDebug, ChannelWriter<string>? logWriter)
         {
             long itemSize = item.IsDirectory ? 0 : item.Length;
 
             if (isDebug)
             {
-                Console.WriteLine($"[DEBUG] {(item.IsDirectory ? "DIR " : "FILE")}: {item.FullName}");
+                Console.WriteLine($"[DEBUG] {(item.IsDirectory ? "DIR " : "FILE")}: {fullPath}");
                 return itemSize;
             }
 
@@ -325,27 +327,30 @@ namespace swiss.plugins.eliminator
                 if (!string.IsNullOrEmpty(backupPath))
                 {
                     // BACKUP
-                    string destItem = Path.Combine(backupPath, item.Name);
+                    ReadOnlySpan<char> nameSpan = item.PathBuffer.AsSpan(item.PathLength - item.NameLength, item.NameLength);
+                    string name = new(nameSpan);
+
+                    string destItem = Path.Combine(backupPath, name);
                     if (item.IsDirectory ? Directory.Exists(destItem) : File.Exists(destItem))
                     {
-                        string ext = item.Extension;
-                        string nameOnly = Path.GetFileNameWithoutExtension(item.Name);
+                        string ext = Path.GetExtension(name);
+                        string nameOnly = Path.GetFileNameWithoutExtension(name);
                         destItem = Path.Combine(backupPath, $"{nameOnly}_{Guid.NewGuid().ToString("N")[..8]}{ext}");
                     }
 
-                    if (item.IsDirectory) Directory.Move(item.FullName, destItem);
-                    else File.Move(item.FullName, destItem);
+                    if (item.IsDirectory) Directory.Move(fullPath, destItem);
+                    else File.Move(fullPath, destItem);
 
-                    logWriter?.TryWrite($"{item.FullName};{destItem};{itemSize};{DateTime.Now:O}");
+                    logWriter?.TryWrite($"{fullPath};{destItem};{itemSize};{DateTime.Now:O}");
                 }
                 else
                 {
                     // ELIMINAZIONE
-                    if (item.IsDirectory) Directory.Delete(item.FullName, recursive: true);
+                    if (item.IsDirectory) Directory.Delete(fullPath, recursive: true);
                     else
                     {
-                        bool success = NativeIO.DeleteFile(item.FullName);
-                        if (!success) PrintWarning($"Impossibile cancellare {item.FullName}");
+                        bool success = NativeIO.DeleteFile(fullPath);
+                        if (!success) PrintWarning($"Impossibile cancellare {fullPath}");
                     }
                 }
 
@@ -353,7 +358,8 @@ namespace swiss.plugins.eliminator
             }
             catch (Exception ex)
             {
-                PrintError($"eccezione su {item.Name}: {ex.Message}");
+                ReadOnlySpan<char> nameSpan = item.PathBuffer.AsSpan(item.PathLength - item.NameLength, item.NameLength);
+                PrintError($"eccezione su {new string(nameSpan)}: {ex.Message}");
                 return -1; // -1 indica errore
             }
         }
