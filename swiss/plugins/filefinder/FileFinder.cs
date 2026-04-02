@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using System.Buffers;
 using utils;
+using System.IO.Compression;
 
 namespace plugins.filefinder
 {
@@ -22,6 +23,11 @@ namespace plugins.filefinder
             string root = args[0];
             string pattern = args[1];
 
+            var options = ParseArguments(args, 2);
+
+            var isPatternFixed = options.ContainsKey("--fixed") || options.ContainsKey("-f");
+            var ignoreCase = options.ContainsKey("--ignore-case") || options.ContainsKey("-i");
+
             if (root == ".")
             {
                 root = Directory.GetCurrentDirectory();
@@ -33,11 +39,13 @@ namespace plugins.filefinder
             }
 
             Regex? regex = null;
-            if (!string.IsNullOrEmpty(pattern))
+            if (!string.IsNullOrEmpty(pattern) && !isPatternFixed)
             {
                 try
                 {
-                    regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                    var regexOptions = RegexOptions.Compiled | RegexOptions.NonBacktracking;
+                    if (ignoreCase) regexOptions |= RegexOptions.IgnoreCase;
+                    regex = new Regex(pattern, regexOptions);
                 }
                 catch (Exception)
                 {
@@ -45,8 +53,21 @@ namespace plugins.filefinder
                     return;
                 }
             }
+            // Funzione di filtraggio dei file
+            Func<ReadOnlySpan<char>, bool> filterFunction;
+            if (isPatternFixed)
+            {
+                // uso indexOf diretto - no regex
+                StringComparison indexOfOptions = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                filterFunction = (span) => span.IndexOf(pattern.AsSpan(), indexOfOptions) >= 0;
+            }
+            else
+            {
+                // utilizzo le regex
+                filterFunction = regex == null ? (span) => true : (span) => regex == null || regex.IsMatch(span);
+            }
 
-            var options = new EnumerationOptions
+            var enumerationOptions = new EnumerationOptions
             {
                 IgnoreInaccessible = true,
                 RecurseSubdirectories = true,
@@ -55,7 +76,7 @@ namespace plugins.filefinder
             // avvio il walker
             var walkerReader = FastWalker.Walk<StackFileInfo>(
                 root,
-                options,
+                enumerationOptions,
                 (ref System.IO.Enumeration.FileSystemEntry entry) => new StackFileInfo(ref entry),
                 maxDegreeOfParallelism: Environment.ProcessorCount,
                 SingleReader: false,
@@ -74,7 +95,7 @@ namespace plugins.filefinder
                 {
                     try
                     {
-                        if (regex == null || regex.IsMatch(item.AsNameSpan()))
+                        if (filterFunction(item.AsNameSpan()))
                         {
                             Interlocked.Increment(ref matchCount);
                             PrintMatch(item.GetFullPath());
