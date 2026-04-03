@@ -66,7 +66,7 @@ using Process currentProcess = Process.GetCurrentProcess();
 
 if (plugin != null)
 {
-    if (pluginArgs[0] == "help")
+    if (pluginArgs.Length > 0 && pluginArgs[0] == "help")
     {
         plugin.Help();
         return;
