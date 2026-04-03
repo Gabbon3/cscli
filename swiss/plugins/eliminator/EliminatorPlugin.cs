@@ -233,13 +233,13 @@ namespace swiss.plugins.eliminator
                     await Parallel.ForEachAsync(
                         workChannel.Reader.ReadAllAsync(ct),
                         parallelOptions,
-                        async (item, token) =>
+                        (item, token) =>
                         {
                             try
                             {
                                 long currentProcessed = Interlocked.Increment(ref processedCount);
                                 // filtro il file
-                                if (!shouldProcess(item)) return;
+                                if (!shouldProcess(item)) return ValueTask.CompletedTask;
                                 // calcolo la stringa solo dopo aver filtrato
                                 string finalPath = new(item.PathBuffer, 0, item.PathLength);
                                 long size = ExecuteItemAction(finalPath, item, backupPath, isDebug, logChannel.Writer);
@@ -257,6 +257,7 @@ namespace swiss.plugins.eliminator
                                     ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
                                 }
                             }
+                            return ValueTask.CompletedTask;
                         });
                 }
                 // FOREACH SEQUENZIALE
