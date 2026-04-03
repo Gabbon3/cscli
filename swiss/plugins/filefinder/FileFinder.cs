@@ -6,7 +6,7 @@ namespace plugins.filefinder
     class FileFinder : Plugin
     {
         public override string Name => "find";
-        public override string Description => "Ricerca tramite Regex di file";
+        public override string Description => "Ricerca di file tramite regex o stringhe fisse";
 
         private static readonly object _consoleLock = new();
 
@@ -119,7 +119,13 @@ namespace plugins.filefinder
         public override void Help()
         {
             Console.WriteLine("--------------------------------");
-            Console.WriteLine("Utilizzo: swiss find <percorso> <regex>");
+            Console.WriteLine("Utilizzo: swiss find <percorso> <pattern> [opzioni]");
+            Console.WriteLine(" - percorso: il percorso su cui effettuare la ricerca");
+            Console.WriteLine(" - pattern: la stringa da usare per la ricerca, regex di default");
+            Console.WriteLine("Opzioni:");
+            Console.WriteLine(" --ignore-case, -i : Rende case insensitive la ricerca");
+            Console.WriteLine(" --fixed, -f       : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
+            Console.WriteLine("Esempi:");
             Console.WriteLine(" - swiss find C:\\Users\\ \".*\\.pdf\"");
             Console.WriteLine(" - swiss find . \"\"");
             Console.WriteLine("--------------------------------");
