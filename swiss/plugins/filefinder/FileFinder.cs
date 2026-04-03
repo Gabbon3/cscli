@@ -1,7 +1,5 @@
 using System.Text.RegularExpressions;
-using System.Buffers;
-using utils;
-using System.IO.Compression;
+using stack;
 
 namespace plugins.filefinder
 {
@@ -83,7 +81,7 @@ namespace plugins.filefinder
                 ct
             );
             // avvio i consumer
-            int matchCount = 0;
+            // int matchCount = 0; // INFO: al momento non serve
             await Parallel.ForEachAsync(
                 walkerReader.ReadAllAsync(ct),
                 new ParallelOptions
@@ -91,44 +89,29 @@ namespace plugins.filefinder
                     MaxDegreeOfParallelism = Environment.ProcessorCount,
                     CancellationToken = ct
                 },
-                async (item, token) =>
+                (item, token) =>
                 {
-                    try
+                    using (item)
                     {
                         if (filterFunction(item.AsNameSpan()))
                         {
-                            Interlocked.Increment(ref matchCount);
-                            PrintMatch(item.GetFullPath());
+                            // Interlocked.Increment(ref matchCount);
+                            PrintMatch(item.AsDirectorySpan(), item.AsNameSpan());
                         }
                     }
-                    finally
-                    {
-                        // libero l'ArrayPool
-                        if (item.PathBuffer != null)
-                            ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
-                    }
+                    return ValueTask.CompletedTask;
                 }
             );
         }
 
-        private static void PrintMatch(string path)
+        private static void PrintMatch(ReadOnlySpan<char> directorySpan, ReadOnlySpan<char> fileNameSpan)
         {
-            int lastSeparator = path.LastIndexOf(Path.DirectorySeparatorChar);
-            if (lastSeparator == -1)
-            {
-                Console.WriteLine(path);
-                return;
-            }
-
-            string directory = path[..(lastSeparator + 1)];
-            string fileName = path[(lastSeparator + 1)..];
-
             lock (_consoleLock)
             {
                 Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.Write(directory);
+                Console.Out.Write(directorySpan);
                 Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine(fileName);
+                Console.Out.WriteLine(fileNameSpan);
                 Console.ResetColor();
             }
         }
