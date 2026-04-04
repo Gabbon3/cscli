@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using stack;
+using utils;
 
 namespace plugins.filefinder
 {
@@ -32,7 +33,7 @@ namespace plugins.filefinder
             }
             else if (!Directory.Exists(root))
             {
-                Console.WriteLine($"Errore: il percorso \"{root}\" non esiste");
+                PrintError($"il percorso \"{root}\" non esiste");
                 return;
             }
 
@@ -118,17 +119,17 @@ namespace plugins.filefinder
 
         public override void Help()
         {
-            Console.WriteLine("--------------------------------");
-            Console.WriteLine("Utilizzo: swiss find <percorso> <pattern> [opzioni]");
-            Console.WriteLine(" - percorso: il percorso su cui effettuare la ricerca");
-            Console.WriteLine(" - pattern: la stringa da usare per la ricerca, regex di default");
-            Console.WriteLine("Opzioni:");
-            Console.WriteLine(" --ignore-case, -i : Rende case insensitive la ricerca");
-            Console.WriteLine(" --fixed, -f       : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
-            Console.WriteLine("Esempi:");
-            Console.WriteLine(" - swiss find C:\\Users\\ \".*\\.pdf\"");
-            Console.WriteLine(" - swiss find . \"\"");
-            Console.WriteLine("--------------------------------");
+            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
+            ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]find [DarkGray]<percorso> <pattern> [opzioni]");
+            ConsolePlus.Write("[Cyan]#[/] - percorso: il percorso su cui effettuare la ricerca");
+            ConsolePlus.Write("[Cyan]#[/] - pattern: la stringa da usare per la ricerca, regex di default");
+            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
+            ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i : Rende case insensitive la ricerca");
+            ConsolePlus.Write("[Cyan]#[/] --fixed, -f       : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
+            ConsolePlus.Write("[Cyan]#[/] Esempi:");
+            ConsolePlus.Write("[Cyan]#[/] - swiss find C:\\Users\\ \".*\\.pdf\"");
+            ConsolePlus.Write("[Cyan]#[/] - swiss find . \"\"");
+            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
         }
     }
 }

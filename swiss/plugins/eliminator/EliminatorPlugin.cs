@@ -25,9 +25,13 @@ namespace swiss.plugins.eliminator
             // 1. PARSING E VALIDAZIONE
             // ---------------------------------------------------------
             string targetPath = args[0];
-            if (!Directory.Exists(targetPath))
+            if (targetPath == ".")
             {
-                PrintError($"La directory target non esiste: {targetPath}");
+                targetPath = Directory.GetCurrentDirectory();
+            }
+            else if (!Directory.Exists(targetPath))
+            {
+                Console.WriteLine($"Errore: il percorso \"{targetPath}\" non esiste");
                 return;
             }
 
@@ -445,20 +449,23 @@ namespace swiss.plugins.eliminator
 
         public override void Help()
         {
-            Console.WriteLine("Uso: swiss eliminator <target_path> [opzioni]");
-            Console.WriteLine("\nOpzioni:");
-            Console.WriteLine("  --regex <pattern>     : Filtra i file in base a un'espressione regolare sul nome");
-            Console.WriteLine("  --ignore-case, -i     : Rende case insensitive la regex");
-            Console.WriteLine("  --older-than <giorni> : Colpisce solo i file più vecchi di X giorni");
-            Console.WriteLine("  --date-type <m|c|a>   : Tipo di data per --older-than (m=Modifica, c=Creazione, a=Accesso). Default: m");
-            Console.WriteLine("  --backup-path <path>  : Invece di eliminare, sposta i file in questa cartella e genera un log CSV");
-            Console.WriteLine("  --rollback            : Ripristina i file dalle posizioni di un backup precedente");
-            Console.WriteLine("  --debug, -d           : Simula l'operazione senza toccare i file sul disco");
-            Console.WriteLine("  --recursive, -r       : Scansiona anche le sottocartelle");
-            Console.WriteLine("  --force, -f, -y       : Procedi senza chiedere nessuna conferma di esecuzione");
-            Console.WriteLine("  --dirs                : Applica i filtri e le operazioni alle CARTELLE anziché ai file");
-            Console.WriteLine("  --parallel, -p        : Esegue l'operazione in multithreading");
-            Console.WriteLine("  --threads, -t <num>   : Specifica il numero massimo di thread (default: numero di core della CPU)");
+            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
+            ConsolePlus.Write("[Cyan]#[/] Uso: [Yellow]swiss [Magenta]eliminator [DarkGray]<percorso> [opzioni]");
+            ConsolePlus.Write("[Cyan]#[/] - percorso : usa . per la cartella corrente oppure definisci un percorso completo");
+            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
+            ConsolePlus.Write("[Cyan]#[/]  --regex <pattern>     : Filtra i file in base a un'espressione regolare sul nome");
+            ConsolePlus.Write("[Cyan]#[/]  --ignore-case, -i     : Rende case insensitive la regex");
+            ConsolePlus.Write("[Cyan]#[/]  --older-than <giorni> : Colpisce solo i file più vecchi di X giorni");
+            ConsolePlus.Write("[Cyan]#[/]  --date-type <m|c|a>   : Tipo di data per --older-than (m=Modifica, c=Creazione, a=Accesso). Default: m");
+            ConsolePlus.Write("[Cyan]#[/]  --backup-path <path>  : Invece di eliminare, sposta i file in questa cartella e genera un log CSV");
+            ConsolePlus.Write("[Cyan]#[/]  --rollback            : Ripristina i file dalle posizioni di un backup precedente");
+            ConsolePlus.Write("[Cyan]#[/]  --debug, -d           : Simula l'operazione senza toccare i file sul disco");
+            ConsolePlus.Write("[Cyan]#[/]  --recursive, -r       : Scansiona anche le sottocartelle");
+            ConsolePlus.Write("[Cyan]#[/]  --force, -f, -y       : Procedi senza chiedere nessuna conferma di esecuzione");
+            ConsolePlus.Write("[Cyan]#[/]  --dirs                : Applica i filtri e le operazioni alle CARTELLE anziché ai file");
+            ConsolePlus.Write("[Cyan]#[/]  --parallel, -p        : Esegue l'operazione in multithreading");
+            ConsolePlus.Write("[Cyan]#[/]  --threads, -t <num>   : Specifica il numero massimo di thread (default: numero di core della CPU)");
+            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
         }
     }
 }
