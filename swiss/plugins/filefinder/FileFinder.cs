@@ -13,7 +13,7 @@ namespace plugins.filefinder
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 2 || string.Equals(args[0], "help"))
+            if (args.Length < 2)
             {
                 Help();
                 return;
@@ -121,7 +121,7 @@ namespace plugins.filefinder
         {
             ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
             ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]find [DarkGray]<percorso> <pattern> [opzioni]");
-            ConsolePlus.Write("[Cyan]#[/] - percorso: il percorso su cui effettuare la ricerca");
+            ConsolePlus.Write("[Cyan]#[/] - percorso: usa . per la cartella corrente oppure definisci un percorso completo");
             ConsolePlus.Write("[Cyan]#[/] - pattern: la stringa da usare per la ricerca, regex di default");
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
             ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i : Rende case insensitive la ricerca");

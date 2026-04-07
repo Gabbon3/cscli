@@ -45,7 +45,7 @@ namespace plugins
             lock (_printErrorLock)
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"{Name} WARNING: {message}");
+                Console.WriteLine($"[ ! ] {Name}: {message}");
                 Console.ResetColor();
             }
         }
@@ -55,7 +55,7 @@ namespace plugins
             lock (_printErrorLock)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"{Name} ERROR: {message}");
+                Console.WriteLine($"[!!!] {Name}: {message}");
                 Console.ResetColor();
             }
         }

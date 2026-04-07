@@ -1,6 +1,4 @@
-﻿using plugins;
-
-namespace swiss.plugins.eqfile
+﻿namespace plugins.eqfile
 {
     class EqFilePlugin : Plugin
     {

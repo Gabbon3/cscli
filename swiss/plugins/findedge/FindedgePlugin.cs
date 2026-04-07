@@ -1,7 +1,8 @@
-﻿using plugins;
+﻿using stack;
+using System.IO.Enumeration;
 using utils;
 
-namespace swiss.plugins.findedge
+namespace plugins.findedge
 {
     public enum EdgeMode
     {
@@ -27,7 +28,6 @@ namespace swiss.plugins.findedge
             string targetPath = args[0];
             EdgeMode mode;
             bool recursive = false;
-            int bufferSizeKB = 0;
 
             switch (args[1].ToLower())
             {
@@ -43,17 +43,7 @@ namespace swiss.plugins.findedge
 
             if (args.Length >= 3)
             {
-                bool converted = int.TryParse(args[2], out bufferSizeKB);
-                if (!converted || bufferSizeKB < 4 || bufferSizeKB > 16384)
-                {
-                    PrintError($"Il valore inserito in <bufferSize> non è valido: {args[2]}");
-                    return;
-                }
-            }
-
-            if (args.Length >= 4)
-            {
-                recursive = args[3] == "--recursive";
+                recursive = args[2] == "--recursive";
             }
 
             if (!Directory.Exists(targetPath))
@@ -66,10 +56,10 @@ namespace swiss.plugins.findedge
             Console.WriteLine("Inizio la ricerca del file...");
             Console.ResetColor();
 
-            await Task.Run(() => ScanDirectory(targetPath, mode, recursive, bufferSizeKB, ct), ct);
+            await Task.Run(() => ScanDirectory(targetPath, mode, recursive, ct), ct);
         }
 
-        private void ScanDirectory(string path, EdgeMode mode, bool recursive, int bufferSizeKB, CancellationToken ct)
+        private void ScanDirectory(string path, EdgeMode mode, bool recursive, CancellationToken ct)
         {
             var enumOptions = new EnumerationOptions
             {
@@ -77,16 +67,34 @@ namespace swiss.plugins.findedge
                 RecurseSubdirectories = recursive,
                 ReturnSpecialDirectories = false,
                 AttributesToSkip = FileAttributes.System | FileAttributes.Hidden,
-                BufferSize = bufferSizeKB * 1024 // converto in bytes
+                BufferSize = 64 * 1024
             };
 
-            var dirInfo = new DirectoryInfo(path);
-            FileInfo? edgeFile = null;
+            var enumerable = new FileSystemEnumerable<StackFileInfo>(
+                path,
+                (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
+                enumOptions
+            )
+            {
+                // filtro per escludere le directory che di fatto non servono
+                ShouldIncludePredicate = (ref FileSystemEntry entry) => !entry.IsDirectory
+            };
+
+            StackFileInfo edgeFile = default;
             long fileCount = 0;
 
             try
             {
-                using var enumerator = dirInfo.EnumerateFiles("*", enumOptions).GetEnumerator();
+                using var enumerator = enumerable.GetEnumerator();
+
+                Func<StackFileInfo, StackFileInfo, bool> isBetter = mode switch
+                {
+                    EdgeMode.Oldest => (current, best) => current.LastWriteTime < best.LastWriteTime,
+                    EdgeMode.Newest => (current, best) => current.LastWriteTime > best.LastWriteTime,
+                    EdgeMode.Smallest => (current, best) => current.Length < best.Length,
+                    EdgeMode.Largest => (current, best) => current.Length > best.Length,
+                    _ => (current, best) => false
+                };
 
                 if (!enumerator.MoveNext())
                 {
@@ -97,40 +105,31 @@ namespace swiss.plugins.findedge
                 edgeFile = enumerator.Current;
                 fileCount++;
 
-                Func<FileInfo, FileInfo, bool> isNewEdge = mode switch
-                {
-                    EdgeMode.Oldest => (current, best) => current.LastWriteTimeUtc < best.LastWriteTimeUtc,
-                    EdgeMode.Newest => (current, best) => current.LastWriteTimeUtc > best.LastWriteTimeUtc,
-                    EdgeMode.Smallest => (current, best) => current.Length < best.Length,
-                    EdgeMode.Largest => (current, best) => current.Length > best.Length,
-                    _ => (current, best) => false
-                };
-
                 while (enumerator.MoveNext())
                 {
                     ct.ThrowIfCancellationRequested();
-                    var file = enumerator.Current;
+                    StackFileInfo current = enumerator.Current;
                     fileCount++;
 
-                    if (fileCount % 50000 == 0)
-                        Console.Write($"\rFile analizzati: {fileCount}...");
+                    if (fileCount % 50000 == 0) Console.Write($"\rFile analizzati: {fileCount}...");
 
-                    if (isNewEdge(file, edgeFile!)) edgeFile = file;
+                    if (isBetter(current, edgeFile))
+                    {
+                        edgeFile.Dispose();
+                        edgeFile = current;
+                    }
+                    else
+                    {
+                        current.Dispose();
+                    }
                 }
 
-                if (edgeFile != null)
-                {
-                    Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"\n--- Risultato per la ricerca: {mode.ToString().ToUpper()} ---");
-                    Console.WriteLine($"File: {edgeFile.FullName}");
-                    Console.WriteLine($"Data Modifica: {edgeFile.LastWriteTime:yyyy-MM-dd HH:mm:ss}");
-                    Console.WriteLine($"Dimensione: {Formatter.Bytes(edgeFile.Length)}");
-                    Console.ResetColor();
-                }
-                else
-                {
-                    Console.WriteLine("Nessun file trovato nella directory.");
-                }
+                Console.WriteLine();
+                ConsolePlus.Write($"[Green]#[/] Ricerca terminata:");
+                ConsolePlus.Write($"[Green]#[/] File: [Cyan]{edgeFile.GetFullPath()}");
+                ConsolePlus.Write($"[Green]#[/] Data Modifica: [Magenta]{edgeFile.LastWriteTime:yyyy-MM-dd HH:mm:ss}");
+                ConsolePlus.Write($"[Green]#[/] Dimensione: [Gray]{Formatter.Bytes(edgeFile.Length)}[/]");
+                Console.ResetColor();
             }
             catch (OperationCanceledException)
             {
@@ -142,20 +141,20 @@ namespace swiss.plugins.findedge
             {
                 PrintError($"Errore durante la scansione: {ex.Message}");
             }
+            finally
+            {
+                edgeFile.Dispose();
+            }
         }
 
         public override void Help()
         {
-            Console.WriteLine("Uso: swiss findedge <path> <flag> <bufferSize> <recursive>");
+            Console.WriteLine("Uso: swiss findedge <path> <flag> <recursive>");
             Console.WriteLine("\n<flag> Flags disponibili:");
             Console.WriteLine("  --oldest   : trova il file con la data di modifica più remota");
             Console.WriteLine("  --newest   : trova il file con la data di modifica più recente");
             Console.WriteLine("  --smallest : trova il file con la dimensione minore in byte");
             Console.WriteLine("  --largest  : trova il file con la dimensione maggiore in byte");
-            Console.WriteLine("\n<bufferSize> definisce la dimensione del buffer della EnumerateFiles in KB:");
-            Console.WriteLine("  * default 0 (utilizza le impostazioni del sistema)");
-            Console.WriteLine("  * valore massimo 4096 (4MB)");
-            Console.WriteLine("  * minimo 4 (KB)");
             Console.WriteLine("\n<recursive> Per usare la ricorsione (default false) basta aggiungere:");
             Console.WriteLine("  --recursive");
         }

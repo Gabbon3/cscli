@@ -2,11 +2,10 @@
 using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
-using plugins;
 using utils;
 using stack;
 
-namespace swiss.plugins.eliminator
+namespace plugins.eliminator
 {
     class EliminatorPlugin : Plugin
     {

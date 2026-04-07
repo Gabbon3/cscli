@@ -1,19 +1,22 @@
 ﻿using System.Diagnostics;
 using plugins;
+using utils;
+// lista plugins
 using plugins.filefinder;
+using plugins.tree;
 using plugins.indexer;
 using plugins.searcher;
-using plugins.tree;
-using swiss.plugins.eqfile;
-using swiss.plugins.findedge;
-using swiss.plugins.eliminator;
-
+using plugins.eqfile;
+using plugins.findedge;
+using plugins.eliminator;
+// # ----------------------- #
+// # CONFIGURAZIONE INIZIALE #
+// # ----------------------- #
+// info sulla versione
+const string version = "1.8.1";
+const string versionDescription = "Refactoring Tree.cs - utilizzo di FastWalker";
 // cancellation token
 using var cts = new CancellationTokenSource();
-
-const string version = "1.7.0";
-const string versionDescription = "filewalker util - walker del file system parallelo";
-
 Console.CancelKeyPress += (sender, e) =>
 {
     e.Cancel = true;
@@ -23,109 +26,135 @@ Console.CancelKeyPress += (sender, e) =>
     // invio del segnale di stop del processo in maniera safe
     cts.Cancel();
 };
+// registro dei plugin
+List<PluginRegistration> plugins = [
+    new("find", "Cerca file nel file system", () => new FileFinder()),
+    new("tree", "Mostra l'albero delle directory", () => new TreePlugin()),
+    //new("indexer", "Indicizza i contenuti per ricerche veloci", () => new IndexerPlugin()),
+    //new("searcher", "Cerca testo all'interno dei file", () => new SearcherPlugin()),
+    new("eqfile", "Confronta file o trova duplicati", () => new EqFilePlugin()),
+    new("findedge", "Trova file con caratteristiche limite", () => new FindEdgePlugin()),
+    new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin())
+];
+// # ----------------------- #
 
+// # --------------------------------- # 
+// # RECUPERO INFORMAZIONI PRELIMINARI # 
+// # --------------------------------- # 
 if (args.Length == 0)
 {
-    Console.WriteLine("swiss help per avere maggiori informazioni ...");
-    Help(new List<Plugin>());
+    ConsolePlus.Write("[Yellow][ ! ] Nessun comando inserito[/]\n[ i ] [Cyan]swiss --help[/] oppure [Cyan]swiss -h[/] per ottenere maggiori informazioni");
+    //Help(plugins);
     return;
 }
 
 string pluginName = args[0].ToLower();
 
-// registro dei plugin
-List<Plugin> plugins = [
-    new FileFinder(),
-    new TreePlugin(),
-    new IndexerPlugin(),
-    new SearcherPlugin(),
-    new EqFilePlugin(),
-    new FindEdgePlugin(),
-    new EliminatorPlugin()
-];
-
-if (pluginName == "help")
+if (pluginName == "--help" || pluginName == "-h")
 {
     Help(plugins);
     return;
 }
 
-if (pluginName == "version")
+if (pluginName == "--version" || pluginName == "-v")
 {
     VersionInfo();
     return;
 }
 
-string[] pluginArgs = [.. args[1..]];
+bool printStats = args[^1] == "--stats";
+string[] pluginArgs = [];
+if (printStats)
+{
+    pluginArgs = args.Length > 1 ? [.. args[1..^1]] : [];
+}
+else
+{
+    pluginArgs = [.. args[1..]];
+}
 
+PluginRegistration? pluginMeta = plugins.FirstOrDefault(p => p.Name == pluginName);
+// # --------------------------------- #
 
-Plugin? plugin = plugins.FirstOrDefault(p => p.Name == pluginName);
+// # ---------------------- #
+// # -- AVVIO DEL PLUGIN -- #
+// # ---------------------- #
 
 // setup per analisi performance processo
 using Process currentProcess = Process.GetCurrentProcess();
 
-if (plugin != null)
+if (pluginMeta != null)
 {
-    if (pluginArgs.Length > 0 && pluginArgs[0] == "help")
+    Plugin plugin = pluginMeta.Factory();
+
+    if (pluginArgs.Length > 0 && (pluginArgs[0] == "--help" || pluginArgs[0] == "-h"))
     {
         plugin.Help();
         return;
     }
-    // snapshot iniziale performance
-    currentProcess.Refresh();
-    long startTimestamp = Stopwatch.GetTimestamp();
-    TimeSpan startCpuTime = currentProcess.TotalProcessorTime;
-    long startGcMemory = GC.GetTotalMemory(false);
-
+    // # STATS
+    long startTimestamp = 0;
+    TimeSpan startCpuTime = TimeSpan.Zero;
+    long startGcMemory = 0;
+    if (printStats)
+    {
+        currentProcess.Refresh();
+        startTimestamp = Stopwatch.GetTimestamp();
+        startCpuTime = currentProcess.TotalProcessorTime;
+        startGcMemory = GC.GetTotalMemory(false);
+    }
+    // # -----
     try
     {
+        // # ESECUZIONE PLUGIN
         await plugin.RunAsync(pluginArgs, cts.Token);
+        // # -----------------
     }
     catch (OperationCanceledException)
     {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("\nOperazione annullata dall'utente.");
-        Console.ResetColor();
+        ConsolePlus.Write("\n[Yellow]Operazione annullata dall'utente.[/]");
     }
     catch (Exception ex)
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"Errore imprevisto esecuzione plugin: {ex.Message}");
-        Console.ResetColor();
+        ConsolePlus.Write($"\n[Red]Errore imprevisto esecuzione plugin: {ex.Message}[/]");
     }
     finally
     {
-        // calcolo statistiche finali anche se crasha o viene annullato
-        TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
-
-        currentProcess.Refresh();
-        TimeSpan endCpuTime = currentProcess.TotalProcessorTime;
-        TimeSpan cpuUsed = endCpuTime - startCpuTime;
-        long peakMemory = currentProcess.PeakWorkingSet64;
-        long endGcMemory = GC.GetTotalMemory(false);
-
-        PrintStatistics(elapsed, cpuUsed, peakMemory, endGcMemory - startGcMemory);
+        // # STATS
+        if (printStats)
+        {
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+            currentProcess.Refresh();
+            TimeSpan endCpuTime = currentProcess.TotalProcessorTime;
+            TimeSpan cpuUsed = endCpuTime - startCpuTime;
+            long peakMemory = currentProcess.PeakWorkingSet64;
+            long endGcMemory = GC.GetTotalMemory(false);
+            PrintStatistics(elapsed, cpuUsed, peakMemory, endGcMemory - startGcMemory);
+        }
+        // # -----
     }
 }
 else
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine($"Il comando \"{pluginName}\" non esiste.");
-    Console.ResetColor();
-    Help(plugins);
+    ConsolePlus.Write($"[Yellow][ ! ] Il comando \"[Magenta]{pluginName}[Yellow]\" non esiste.[/]");
 }
+// # ---------------------- #
 
-static void Help(List<Plugin> plugins)
+// # -------------------- #
+// # METODI BASE DEL MAIN #
+// # -------------------- #
+static void Help(List<PluginRegistration> plugins)
 {
-    Console.WriteLine("------------------------");
-    Console.WriteLine("Lista comandi supportati:");
+    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
+    ConsolePlus.Write("# Lista comandi supportati:");
     // per formattazione
     int maxNameLength = plugins.Count != 0 ? plugins.Max(p => p.Name.Length) : 0;
     foreach (var plugin in plugins)
     {
-        Console.WriteLine($" - {plugin.Name.PadRight(maxNameLength)} -> {plugin.Description}");
+        ConsolePlus.Write($"* [Cyan]{plugin.Name.PadRight(maxNameLength)}[/] -> [Yellow]{plugin.Description}[/]");
     }
-    Console.WriteLine("------------------------");
+    ConsolePlus.Write($"* [Magenta]{"--stats".PadRight(maxNameLength)}[/] -> [DarkGray]Stampa le statistiche di esecuzione[/]");
+    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
 }
 
 static void VersionInfo()
@@ -137,35 +166,28 @@ static void VersionInfo()
 
 static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryBytes, long gcMemoryDiff)
 {
-    Console.WriteLine();
-    Console.WriteLine("------------------------------------------------");
-    Console.WriteLine("STATISTICHE ESECUZIONE");
-    Console.WriteLine("------------------------------------------------");
+    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
+    Console.WriteLine("# Statistiche esecuzione:");
 
     // tempo reale (wall clock)
-    Console.Write("Tempo Totale:      ");
-    PrintColoredValue($"{elapsed.TotalSeconds:N4} s", ConsoleColor.Cyan);
+    Console.Write("* Tempo Totale:      ");
+    ConsolePlus.Write($"[Cyan]{elapsed.TotalSeconds:N4} s[/]");
 
     // tempo cpu (somma di tutti i core)
-    Console.Write("Tempo CPU:         ");
+    Console.Write("* Tempo CPU:         ");
     double cpuRatio = elapsed.TotalMilliseconds > 0 ? cpuTime.TotalMilliseconds / elapsed.TotalMilliseconds : 0;
-    PrintColoredValue($"{cpuTime.TotalSeconds:N4} s (avg {cpuRatio:N1}x core)", ConsoleColor.Yellow);
+    ConsolePlus.Write($"[Yellow]{cpuTime.TotalSeconds:N4} s (avg {cpuRatio:N1}x core)[/]");
 
     // memoria fisica (RAM)
-    Console.Write("RAM Picco (Phys):  ");
-    PrintColoredValue($"{peakMemoryBytes / 1024.0 / 1024.0:N2} MB", ConsoleColor.Magenta);
+    Console.Write("* RAM Picco (Phys):  ");
+    ConsolePlus.Write($"[Magenta]{peakMemoryBytes / 1024.0 / 1024.0:N2} MB[/]");
 
     // memoria managed (GC)
-    Console.Write("GC Alloc (Delta):  ");
+    Console.Write("* GC Alloc (Delta):  ");
     string sign = gcMemoryDiff >= 0 ? "+" : "";
-    PrintColoredValue($"{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB", ConsoleColor.Gray);
-
-    Console.WriteLine("------------------------------------------------");
+    ConsolePlus.Write($"[Gray]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
+    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
 }
-
-static void PrintColoredValue(string value, ConsoleColor color)
-{
-    Console.ForegroundColor = color;
-    Console.WriteLine(value);
-    Console.ResetColor();
-}
+// # -------------------------------- # 
+// dotnet publish -c Release -r win-x64
+// # -------------------------------- # 
