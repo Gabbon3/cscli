@@ -20,20 +20,19 @@ namespace stack
         /// <returns>channel dove verranno lanciati tutti i risultati trovati nel cammino</returns>
         public static ChannelReader<T> Walk<T>(
             string rootPath,
-            EnumerationOptions threadEnumerationOptions,
             TransformFileSystemEntry<T> transform,
-            int maxDegreeOfParallelism = -1,
-            bool SingleReader = true,
+            FastWalkerOptions? options = null,
             CancellationToken ct = default)
         {
-            int threads = maxDegreeOfParallelism > 0 ? maxDegreeOfParallelism : Environment.ProcessorCount;
+            options ??= new FastWalkerOptions();
+            int threads = options.MaxDegreeOfParallelism > 0 ? options.MaxDegreeOfParallelism : Environment.ProcessorCount;
             // dirChannel rappresenta la coda delle cartelle "da esaminare"
             var dirChannel = Channel.CreateUnbounded<string>();
             // outputChannel è il canale dove coinfluiranno tutti i risultati "in uscita" pronti da far usare all'esterno
             var outputChannel = Channel.CreateBounded<T>(new BoundedChannelOptions(50000)
             {
                 SingleWriter = false,
-                SingleReader = SingleReader
+                SingleReader = options.SingleReader
             });
             // pending work rappresenta il WaitGroup che quando arriverà a 0 farà chiudere il canale
             int pendingWork = 1;
@@ -42,12 +41,12 @@ namespace stack
             // opzioni locali per l'enumerazione dei file delle singole cartelle
             var localOptions = new EnumerationOptions
             {
-                IgnoreInaccessible = threadEnumerationOptions.IgnoreInaccessible,
-                RecurseSubdirectories = false,
-                BufferSize = threadEnumerationOptions.BufferSize,
-                AttributesToSkip = threadEnumerationOptions.AttributesToSkip,
-                MatchCasing = threadEnumerationOptions.MatchCasing,
-                MatchType = threadEnumerationOptions.MatchType,
+                IgnoreInaccessible = options.IgnoreInaccessible,
+                RecurseSubdirectories = false, // ricorsione manuale gestita sempre false per i thread
+                BufferSize = options.BufferSize,
+                AttributesToSkip = options.AttributesToSkip,
+                MatchCasing = options.MatchCasing,
+                MatchType = options.MatchType,
                 ReturnSpecialDirectories = false
             };
             // avvio degli operai
@@ -71,11 +70,12 @@ namespace stack
                                     ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                                     {
                                         // se si tratta di una cartella e l'utente vuole la ricorsione sparo tutto nel canale dedicato
-                                        if (entry.IsDirectory && threadEnumerationOptions.RecurseSubdirectories)
+                                        if (entry.IsDirectory && options.RecurseSubdirectories)
                                         {
                                             Interlocked.Increment(ref pendingWork);
                                             // TODO: se possibile da rimuovere l'allocazione sull HEAP - attualmente poco rilevante
                                             dirChannel.Writer.TryWrite(entry.ToFullPath());
+                                            return options.ReturnDirectoriesInOutput;
                                         }
                                         return true;
                                     }

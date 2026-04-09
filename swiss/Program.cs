@@ -4,17 +4,19 @@ using utils;
 // lista plugins
 using plugins.filefinder;
 using plugins.tree;
-using plugins.indexer;
-using plugins.searcher;
+//using plugins.indexer;
+//using plugins.searcher;
 using plugins.eqfile;
 using plugins.findedge;
 using plugins.eliminator;
+using plugins.count;
 // # ----------------------- #
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.1";
-const string versionDescription = "Refactoring Tree.cs - utilizzo di FastWalker";
+const string version = "1.8.3";
+const string versionDescription = "Bug Fix";
+const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (sender, e) =>
@@ -34,7 +36,8 @@ List<PluginRegistration> plugins = [
     //new("searcher", "Cerca testo all'interno dei file", () => new SearcherPlugin()),
     new("eqfile", "Confronta file o trova duplicati", () => new EqFilePlugin()),
     new("findedge", "Trova file con caratteristiche limite", () => new FindEdgePlugin()),
-    new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin())
+    new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin()),
+    new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin())
 ];
 // # ----------------------- #
 
@@ -161,6 +164,7 @@ static void VersionInfo()
 {
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine($"\n{version} - {versionDescription}\n");
+    Console.WriteLine($"\nAuthor - {author}\n");
     Console.ResetColor();
 }
 
@@ -188,6 +192,6 @@ static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryB
     ConsolePlus.Write($"[Gray]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
     ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
 }
-// # -------------------------------- # 
+// # -------------------------------- #
 // dotnet publish -c Release -r win-x64
-// # -------------------------------- # 
+// # -------------------------------- #

@@ -78,8 +78,7 @@ namespace plugins.tree
             var nodes = new Dictionary<string, DirNode>(StringComparer.OrdinalIgnoreCase);
             var rootDirNode = GetOrAddNode(nodes, rootPath, rootPath);
 
-            // Importante: RecurseSubdirectories deve essere true per innescare lo ShouldIncludePredicate in FastWalker
-            var options = new EnumerationOptions
+            var options = new FastWalkerOptions
             {
                 RecurseSubdirectories = true,
                 IgnoreInaccessible = true
@@ -87,10 +86,8 @@ namespace plugins.tree
 
             var channel = FastWalker.Walk<StackFileInfo>(
                 rootPath,
-                options,
                 (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
-                maxDegreeOfParallelism: -1,
-                SingleReader: true,
+                options,
                 ct: ct
             );
 

@@ -66,7 +66,7 @@ namespace plugins.filefinder
                 filterFunction = regex == null ? (span) => true : (span) => regex == null || regex.IsMatch(span);
             }
 
-            var enumerationOptions = new EnumerationOptions
+            var fastWalkerOptions = new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
                 RecurseSubdirectories = true,
@@ -75,10 +75,8 @@ namespace plugins.filefinder
             // avvio il walker
             var walkerReader = FastWalker.Walk<StackFileInfo>(
                 root,
-                enumerationOptions,
                 (ref System.IO.Enumeration.FileSystemEntry entry) => new StackFileInfo(ref entry),
-                maxDegreeOfParallelism: Environment.ProcessorCount,
-                SingleReader: false,
+                fastWalkerOptions,
                 ct
             );
             // avvio i consumer
