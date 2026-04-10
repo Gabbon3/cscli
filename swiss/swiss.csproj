@@ -6,7 +6,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<PublishAot>true</PublishAot>
-		<PublishDir>C:\tesisquare\Tools</PublishDir>
+		<PublishDir>C:\Users\g2004\Desktop\Tools</PublishDir>
 		<StripSymbols>true</StripSymbols>
 		<ConsoleFullSymbolStackTraces>false</ConsoleFullSymbolStackTraces>
 		<StackTraceSupport>false</StackTraceSupport>

@@ -10,12 +10,13 @@ using plugins.eqfile;
 using plugins.findedge;
 using plugins.eliminator;
 using plugins.count;
+using plugins.mdconverter;
 // # ----------------------- #
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.3";
-const string versionDescription = "Bug Fix";
+const string version = "1.8.4";
+const string versionDescription = "MdConverter Plugin";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -37,7 +38,8 @@ List<PluginRegistration> plugins = [
     new("eqfile", "Confronta file o trova duplicati", () => new EqFilePlugin()),
     new("findedge", "Trova file con caratteristiche limite", () => new FindEdgePlugin()),
     new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin()),
-    new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin())
+    new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
+    new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
 ];
 // # ----------------------- #
 
