@@ -12,10 +12,8 @@ namespace stack
         /// </summary>
         /// <typeparam name="T">di default i dati vengono scritti sul channel in uscita come FileSystemEntry, qui puoi inserire un'altro oggetto a scelta dove memorizzare le informazioni di ogni file</typeparam>
         /// <param name="rootPath">percorso su cui iniziare il cammino</param>
-        /// <param name="threadEnumerationOptions">opzioni di enumerazione di lettura delle cartelle da parte di ogni thread</param>
         /// <param name="transform">metodo di trasformazione da FileSystemEntry a T (oggetto scelto per il channel in uscita)</param>
-        /// <param name="maxDegreeOfParallelism">numero massimo di thread che camminano in parallelo il file system</param>
-        /// <param name="SingleReader">true se chi legge i risultati non sono piu thread, false se sono piu thread</param>
+        /// <param name="options">opzioni di configurazione del FastWalker</param>
         /// <param name="ct">token di cancellazione dell'operazione</param>
         /// <returns>channel dove verranno lanciati tutti i risultati trovati nel cammino</returns>
         public static ChannelReader<T> Walk<T>(
@@ -25,7 +23,25 @@ namespace stack
             CancellationToken ct = default)
         {
             options ??= new FastWalkerOptions();
-            int threads = options.MaxDegreeOfParallelism > 0 ? options.MaxDegreeOfParallelism : Environment.ProcessorCount;
+
+            // # THREADS
+            int threads = 0;
+            threads = options.MaxDegreeOfParallelism > 0 ? options.MaxDegreeOfParallelism : Environment.ProcessorCount;
+            // se non si vuole la ricorsione (dunque si analizza solo la cartella root)
+            // utilizzo un solo thread
+            if (options.RecurseSubdirectories == false)
+            {
+                threads = 1;
+            }
+            else
+            {
+                // se è definito il numero di threads uso quello se no uso il numero di processori del pc disponibili
+                threads = options.MaxDegreeOfParallelism > 0
+                    ? options.MaxDegreeOfParallelism
+                    : Environment.ProcessorCount;
+            }
+
+            // # CANALE DIRECTORY
             // dirChannel rappresenta la coda delle cartelle "da esaminare"
             var dirChannel = Channel.CreateUnbounded<string>();
             // outputChannel è il canale dove coinfluiranno tutti i risultati "in uscita" pronti da far usare all'esterno
@@ -38,11 +54,13 @@ namespace stack
             int pendingWork = 1;
             // metto la root nel canale
             dirChannel.Writer.TryWrite(rootPath);
+
+            // # ENUMOPTIONS LOCALI (del thread)
             // opzioni locali per l'enumerazione dei file delle singole cartelle
             var localOptions = new EnumerationOptions
             {
                 IgnoreInaccessible = options.IgnoreInaccessible,
-                RecurseSubdirectories = false, // ricorsione manuale gestita sempre false per i thread
+                RecurseSubdirectories = false, // ricorsione manuale gestita gia a livello superiore, sempre false per i thread
                 BufferSize = options.BufferSize,
                 AttributesToSkip = options.AttributesToSkip,
                 MatchCasing = options.MatchCasing,
@@ -69,19 +87,20 @@ namespace stack
                                 {
                                     ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                                     {
-                                        // se si tratta di una cartella e l'utente vuole la ricorsione sparo tutto nel canale dedicato
-                                        if (entry.IsDirectory && options.RecurseSubdirectories)
+                                        if (entry.IsDirectory)
                                         {
-                                            Interlocked.Increment(ref pendingWork);
-                                            // TODO: se possibile da rimuovere l'allocazione sull HEAP - attualmente poco rilevante
-                                            dirChannel.Writer.TryWrite(entry.ToFullPath());
+                                            if (options.RecurseSubdirectories)
+                                            {
+                                                Interlocked.Increment(ref pendingWork);
+                                                dirChannel.Writer.TryWrite(entry.ToFullPath());
+                                            }
                                             return options.ReturnDirectoriesInOutput;
                                         }
                                         return true;
                                     }
                                 };
 
-                                // implementiamo a mano l'enumerazione per lavorare sulle scritture asincrone
+                                // implemento a mano l'enumerazione per lavorare sulle scritture asincrone
                                 using var enumerator = enumerable.GetEnumerator();
                                 while (enumerator.MoveNext())
                                 {

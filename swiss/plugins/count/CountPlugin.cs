@@ -31,11 +31,12 @@ namespace plugins.count
             }
 
             var includeDirectory = options.ContainsKey("--directory") || options.ContainsKey("-d");
+            var recurse = options.ContainsKey("--recursive") || options.ContainsKey("-r");
 
             var fastWalkerOptions = new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
-                RecurseSubdirectories = true,
+                RecurseSubdirectories = recurse,
                 BufferSize = 64 * 1024,
                 ReturnDirectoriesInOutput = includeDirectory
             };
@@ -65,10 +66,10 @@ namespace plugins.count
                     entry.Dispose();
                 }
             }
-            ConsolePlus.Write($"\n[Cyan]#[/] Conteggio terminato:");
-            ConsolePlus.Write($"\n[Cyan]*[/] Files: [Yellow]{filesCount:N0}[/]");
-            ConsolePlus.Write($"\n[Cyan]*[/] Cartelle: [Blue]{dirsCount:N0}[/]");
-            ConsolePlus.Write($"\n[Cyan]*[/] Totale: [Magenta]{(filesCount + dirsCount):N0}[/]");
+            ConsolePlus.Write($"\n[Cyan]#[/] Conteggio completato:");
+            ConsolePlus.Write($"[Cyan]*[/] Files: [Yellow]{filesCount:N0}[/]");
+            ConsolePlus.Write($"[Cyan]*[/] Cartelle: [Blue]{dirsCount:N0}[/]");
+            ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{(filesCount + dirsCount):N0}[/]");
         }
 
         public override void Help()
@@ -78,6 +79,7 @@ namespace plugins.count
             ConsolePlus.Write("[Cyan]#[/] - percorso: usa . per la cartella corrente oppure definisci un percorso completo");
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
             ConsolePlus.Write("[Cyan]#[/] --directory, -d : Includi le cartelle nel conteggio");
+            ConsolePlus.Write("[Cyan]#[/] --recursive, -r : Includi nel conteggio tutte le sotto cartelle");
             ConsolePlus.Write("[Cyan]#[/] Esempi:");
             ConsolePlus.Write("[Cyan]#[/] - swiss count .");
             ConsolePlus.Write("[Cyan]#[/] - swiss count . -d");
