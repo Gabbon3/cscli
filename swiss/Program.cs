@@ -15,8 +15,8 @@ using plugins.mdconverter;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.4";
-const string versionDescription = "MdConverter Plugin";
+const string version = "1.8.5";
+const string versionDescription = "MdConverter Plugin - KateX";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -165,8 +165,8 @@ static void Help(List<PluginRegistration> plugins)
 static void VersionInfo()
 {
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"\n{version} - {versionDescription}\n");
-    Console.WriteLine($"\nAuthor - {author}\n");
+    Console.WriteLine($"{version} - {versionDescription}\n");
+    Console.WriteLine($"Author - {author}\n");
     Console.ResetColor();
 }
 
