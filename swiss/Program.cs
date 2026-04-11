@@ -16,7 +16,7 @@ using plugins.mdconverter;
 // # ----------------------- #
 // info sulla versione
 const string version = "1.8.5";
-const string versionDescription = "MdConverter Plugin - KateX";
+const string versionDescription = "MdConverter Plugin - KateX - ottimizzazioni";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();

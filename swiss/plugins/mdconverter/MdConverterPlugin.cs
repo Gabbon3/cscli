@@ -14,19 +14,11 @@ namespace plugins.mdconverter
         private bool InParagraph = false;
         private bool InCodeBlock = false;
         private bool IsFirstCodeLine = false;
-        private bool InMathBlock = false;
         private bool InTable = false;
         private bool InBlockquote = false;
         private bool HeaderWritten = false;
         private int CurrentIndent = 0;
         private Stack<ListInfo> ListStack = new();
-        // regex per i match inline
-        private Regex boldRegex = new(@"(?:\*\*|__)(.*?)(?:\*\*|__)", RegexOptions.Compiled);
-        private Regex italicRegex = new(@"(?:\*|_)(.*?)(?:\*|_)", RegexOptions.Compiled);
-        private Regex codeRegex = new(@"`(.+?)`", RegexOptions.Compiled);
-        private Regex imageRegex = new(@"!\[(.*?)\]\((.*?)\)", RegexOptions.Compiled);
-        private Regex urlRegex = new(@"\[(.*?)\]\((.*?)\)", RegexOptions.Compiled);
-        private Regex mathInlineRegex = new(@"\$(.+?)\$", RegexOptions.Compiled);
 
         struct ListInfo(string t, int i)
         {
@@ -110,7 +102,7 @@ namespace plugins.mdconverter
             await writer.WriteLineAsync("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.45/dist/katex.min.js\" crossorigin=\"anonymous\"></script>");
             await writer.WriteLineAsync("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.45/dist/contrib/auto-render.min.js\" crossorigin=\"anonymous\" onload=\"renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true},{left: '$', right: '$', display: false}], throwOnError : false});\"></script>");
             // CSS
-            await writer.WriteLineAsync("<style>@page{margin: 0 !important;}body,pre{font-size:1.1em}:not(pre)>code,code[class*=language-],pre[class*=language-]{font-size:.9em;font-family:\"JetBrains Mono\",monospace!important}ol,p,ul{margin:5px 0}:root{--bc:#fff;--hr:#ddd;--color:#151515;--main:#d63384;--code-bc:#f1f1f1;--blockquote-border:#dfe2e5;--blockquote-bc:#f1f1f1;--blockquote-color:#222}html.dark{--bc:#111;--hr:#333;--color:#eee;--code-bc:#151515;--blockquote-border:#252525;--blockquote-bc:#151515;--blockquote-color:#ddd}*{box-sizing:border-box}body,html{background-color:var(--bc);-webkit-print-color-adjust: exact;print-color-adjust: exact;}body{margin: 0 auto;padding: 10px 25px;font-family:Roboto,Helvetica,sans-serif;line-height:1.5;color:var(--color);max-width:800px}pre{font-family:\"Jetbrains Mono\"!important;tab-size:4;padding:10px;border-radius:10px}:not(pre)>code{background-color:var(--code-bc);padding:2px 5px;border-radius:4px;color:var(--main)}h1{border-bottom:2px solid var(--hr);margin-bottom:.3em}h2{border-bottom:1px solid var(--hr);margin-bottom:.2em}hr{border:none;display:block;background-color:var(--hr);height:2px}ol,ul{padding-inline-start:25px}blockquote{border-left:.25em solid var(--blockquote-border);background-color:var(--blockquote-bc);color:var(--blockquote-color);padding:.5em 1em;margin-left:0}table{border-collapse:collapse;width:100%;margin:15px 0;border:1px solid var(--hr)}td,th{padding:8px 12px;border:1px solid var(--hr);text-align:left}th{background-color:var(--code-bc);font-weight:700}tr:nth-child(even){background-color:rgba(128,128,128,.05)}</style>");
+            await writer.WriteLineAsync("<style>body,pre{font-size:1.1em}:not(pre)>code,code[class*=language-],pre[class*=language-]{font-size:.9em;font-family:\"JetBrains Mono\",monospace!important}ol,p,ul{margin:5px 0}:root{--bc:#fff;--hr:#ddd;--color:#151515;--main:#151515;--code-bc:#f1f1f1;--blockquote-border:#dfe2e5;--blockquote-bc:#f1f1f1;--blockquote-color:#222}html.dark{--bc:#111;--hr:#333;--color:#eee;--main:#eee;--code-bc:#151515;--blockquote-border:#252525;--blockquote-bc:#151515;--blockquote-color:#ddd}*{box-sizing:border-box}body,html{background-color:var(--bc);-webkit-print-color-adjust: exact;print-color-adjust: exact;}body{margin: 0 auto;padding: 10px;font-family:Roboto,Helvetica,sans-serif;line-height:1.6;color:var(--color);max-width:800px}pre{font-family:\"Jetbrains Mono\"!important;tab-size:4;padding:10px;border-radius:10px}:not(pre)>code{background-color:var(--code-bc);padding:2px 5px;border-radius:4px;color:var(--main)}h1{border-bottom:2px solid var(--hr);margin-bottom:.3em}h2{border-bottom:1px solid var(--hr);margin-bottom:.2em}hr{border:none;display:block;background-color:var(--hr);height:2px}ol,ul{padding-inline-start:25px}blockquote{border-left:.25em solid var(--blockquote-border);background-color:var(--blockquote-bc);color:var(--blockquote-color);padding:.5em 1em;margin-left:0}table{border-collapse:collapse;width:100%;margin:15px 0;border:1px solid var(--hr)}td,th{padding:8px 12px;border:1px solid var(--hr);text-align:left}th{background-color:var(--code-bc);font-weight:700}tr:nth-child(even){background-color:rgba(128,128,128,.05)}.math-block{text-align:center}</style>");
             await writer.WriteLineAsync("</head>\n<body>");
 
             // utility
@@ -176,21 +168,8 @@ namespace plugins.mdconverter
                 // # KATEX
                 if (line.StartsWith("$$"))
                 {
-                    InMathBlock = !InMathBlock;
-                    if (InMathBlock)
-                    {
-                        CloseTags(writer);
-                        await writer.WriteAsync("<div class=\"math-block\">$$");
-                    }
-                    else
-                    {
-                        await writer.WriteAsync("$$</div>\n");
-                    }
-                    continue;
-                }
-                if (InMathBlock)
-                {
-                    await writer.WriteAsync(line + " ");
+                    CloseTags(writer);
+                    await writer.WriteAsync($"<div class=\"math-block\">{line}</div>");
                     continue;
                 }
                 // # LISTE
@@ -307,7 +286,7 @@ namespace plugins.mdconverter
             // # 3. Conversione in PDF #
             // # --------------------- #
             if (convertToPdf) await ConvertToPdf(htmlFilePath, keepHtml, ct);
-            else ConsolePlus.Write($"[Cyan]#[/] HTML generato: [Yellow]{htmlFilePath}[/]");
+            else ConsolePlus.Write($"[Cyan]#[Green] HTML generato: [Yellow]{htmlFilePath}[/]");
         }
 
         private void CountIndent(string line)
@@ -335,13 +314,100 @@ namespace plugins.mdconverter
 
         private string ParseInline(string text)
         {
-            text = imageRegex.Replace(text, @"<img src=""$2"" alt=""$1"" style=""max-width:100%;"">");
-            text = urlRegex.Replace(text, @"<a href=""$2"">$1</a>");
-            text = codeRegex.Replace(text, $"<code>$1</code>");
-            text = boldRegex.Replace(text, $"<b>$1</b>");
-            text = italicRegex.Replace(text, $"<i>$1</i>");
-            text = mathInlineRegex.Replace(text, @"<span class=""math-inline"">$$$1$$</span>");
-            return text;
+            if (string.IsNullOrEmpty(text)) return text;
+
+            StringBuilder sb = new ();
+            bool inMath = false;
+            bool inBold = false;
+            bool inItalic = false;
+            bool inCode = false;
+
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                // gestione escape: se trovo \, salto e scrivo il carattere successivo direttamente
+                if (c == '\\' && i + 1 < text.Length && !inMath)
+                {
+                    sb.Append(text[++i]);
+                    continue;
+                }
+                // 2. codice inline: ` (non processa niente dentro)
+                if (c == '`')
+                {
+                    if (!inCode && !inMath)
+                    {
+                        sb.Append("<code>");
+                        inCode = true;
+                    }
+                    else if (inCode)
+                    {
+                        sb.Append("</code>");
+                        inCode = false;
+                    }
+                    else sb.Append(c); // se sono in math scrivo il backtick subito
+                    continue;
+                }
+                // codifico in html caratteri strani se ce ne sono
+                if (inCode) { sb.Append(HttpUtility.HtmlEncode(c.ToString())); continue; }
+                // matematica: $ (non processo nulla come nel codice)
+                if (c == '$')
+                {
+                    if (!inMath)
+                    {
+                        sb.Append("<span class=\"math-inline\">$");
+                        inMath = true;
+                    }
+                    else
+                    {
+                        sb.Append("$</span>");
+                        inMath = false;
+                    }
+                    continue;
+                }
+                if (inMath) { sb.Append(c); continue; }
+                // link
+                if (c == '[' && !inMath)
+                {
+                    int closeBracket = text.IndexOf(']', i);
+                    if (closeBracket != -1 && closeBracket + 1 < text.Length && text[closeBracket + 1] == '(')
+                    {
+                        int closeParen = text.IndexOf(')', closeBracket);
+                        if (closeParen != -1)
+                        {
+                            string label = text.Substring(i + 1, closeBracket - i - 1);
+                            string url = text.Substring(closeBracket + 2, closeParen - closeBracket - 2);
+                            sb.Append($"<a href=\"{url}\">{ParseInline(label)}</a>");
+                            i = closeParen; // Salto alla fine del link
+                            continue;
+                        }
+                    }
+                }
+                // bold e italic (* o _)
+                if (c == '*' || c == '_')
+                {
+                    // controllo se si tratta di un bold verificando il carattere successivo
+                    if (i + 1 < text.Length && text[i + 1] == c)
+                    {
+                        i++; // schippo il secondo carattere
+                        if (!inBold) { sb.Append("<b>"); inBold = true; }
+                        else { sb.Append("</b>"); inBold = false; }
+                    }
+                    else // se è un carattere singolo è italico allora
+                    {
+                        if (!inItalic) { sb.Append("<i>"); inItalic = true; }
+                        else { sb.Append("</i>"); inItalic = false; }
+                    }
+                    continue;
+                }
+                // carattere normale
+                sb.Append(c);
+            }
+            // chiudo eventuali tag rimasti aperti
+            if (inMath) sb.Append("$</span>");
+            if (inBold) sb.Append("</b>");
+            if (inItalic) sb.Append("</i>");
+            if (inCode) sb.Append("</code>");
+            return sb.ToString();
         }
 
         /// <summary>
@@ -375,7 +441,7 @@ namespace plugins.mdconverter
             {
                 using var process = Process.Start(startInfo);
                 await process.WaitForExitAsync(ct);
-                ConsolePlus.Write($"[Cyan]#[/] PDF generato: [Yellow]{pdfFilePath}[/]");
+                ConsolePlus.Write($"[Cyan]#[Green] PDF generato: [Yellow]{pdfFilePath}[/]");
             }
             catch (Exception ex)
             {
@@ -400,8 +466,8 @@ namespace plugins.mdconverter
             ConsolePlus.Write("[Cyan]#[/] --destpath, -dp : path di destinazione del file generato");
             ConsolePlus.Write("[Cyan]#[/] --dark, -d      : genera il documento in dark mode");
             ConsolePlus.Write("[Cyan]#[/] Esempi:");
-            ConsolePlus.Write("[Cyan]#[/] - swiss mdconverter ./readme.md");
-            ConsolePlus.Write("[Cyan]#[/] - swiss mdconverter C:/folder/readme.md -p -k");
+            ConsolePlus.Write("[Cyan]#[/] - swiss mdconverter .readme.md [DarkGray]-> converte il file readme.md contenuto nella cartella corrente in html[/]");
+            ConsolePlus.Write("[Cyan]#[/] - swiss mdconverter C:/folder/readme.md -p -k [DarkGray]-> converte il file readme.md indicato in pdf mantenendo anche il file html[/]");
             ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
         }
     }
