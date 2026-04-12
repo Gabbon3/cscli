@@ -15,8 +15,8 @@ using plugins.mdconverter;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.5";
-const string versionDescription = "MdConverter Plugin - KateX - ottimizzazioni";
+const string version = "1.8.6";
+const string versionDescription = "MdConverter Plugin - supporto per Google Icons, Grafici Mermaid, Github Notes";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -43,9 +43,9 @@ List<PluginRegistration> plugins = [
 ];
 // # ----------------------- #
 
-// # --------------------------------- # 
-// # RECUPERO INFORMAZIONI PRELIMINARI # 
-// # --------------------------------- # 
+// # --------------------------------- #
+// # RECUPERO INFORMAZIONI PRELIMINARI #
+// # --------------------------------- #
 if (args.Length == 0)
 {
     ConsolePlus.Write("[Yellow][ ! ] Nessun comando inserito[/]\n[ i ] [Cyan]swiss --help[/] oppure [Cyan]swiss -h[/] per ottenere maggiori informazioni");
@@ -164,10 +164,10 @@ static void Help(List<PluginRegistration> plugins)
 
 static void VersionInfo()
 {
-    Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"{version} - {versionDescription}\n");
-    Console.WriteLine($"Author - {author}\n");
-    Console.ResetColor();
+    ConsolePlus.Write($"[Cyan]# [DarkGray]--------------------- [Cyan]#[/]");
+    ConsolePlus.Write($"[Cyan]#[/] [Green]{version}[/] - {versionDescription}");
+    ConsolePlus.Write($"[Cyan]#[/] Author: [Green]{author}");
+    ConsolePlus.Write($"[Cyan]# [DarkGray]--------------------- [Cyan]#[/]");
 }
 
 static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryBytes, long gcMemoryDiff)
