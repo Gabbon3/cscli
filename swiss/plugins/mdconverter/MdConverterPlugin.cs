@@ -39,9 +39,9 @@ namespace plugins.mdconverter
             // # 1. Parsing e validazione argomenti #
             // # ---------------------------------- #
             string mdPath = args[0];
-            if (mdPath.StartsWith('.'))
+            if (mdPath.StartsWith("./"))
             {
-                mdPath = Path.Combine(Environment.CurrentDirectory, mdPath[1..]);
+                mdPath = Path.Combine(Environment.CurrentDirectory, mdPath[2..]);
             }
             if (!Path.Exists(mdPath))
             {
@@ -55,10 +55,14 @@ namespace plugins.mdconverter
             var darkMode = options.ContainsKey("--dark") || options.ContainsKey("-d");
             // chiave valore
             var destPath = options.TryGetValue("--destpath", out var dc) ? dc : options.TryGetValue("-dp", out var ds) ? ds : null;
-            if (!string.IsNullOrEmpty(destPath) && !Path.Exists(destPath))
+            if (!String.IsNullOrEmpty(destPath))
             {
-                PrintError($"il percorso di destinazione \"{destPath}\" non esiste");
-                return;
+                if (destPath.StartsWith("./") && destPath.Length > 1) destPath = Path.Combine(Environment.CurrentDirectory, destPath[2..]);
+                if (!Path.Exists(destPath))
+                {
+                    PrintError($"il percorso di destinazione \"{destPath}\" non esiste");
+                    return;
+                }
             }
             // opzioni mermaid
             // - tema
