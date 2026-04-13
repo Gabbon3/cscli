@@ -11,12 +11,13 @@ using plugins.findedge;
 using plugins.eliminator;
 using plugins.count;
 using plugins.mdconverter;
+using plugins.cripto;
 // # ----------------------- #
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.6";
-const string versionDescription = "MdConverter Plugin - supporto per Google Icons, Grafici Mermaid, Github Notes";
+const string version = "1.8.7";
+const string versionDescription = "Cripto Plugin - nuovo plugin per cifrare e decifrare file usando DPAPI";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -40,6 +41,7 @@ List<PluginRegistration> plugins = [
     new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin()),
     new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
+    new("cripto", "Effettua la crittografia su file o cartelle legata all'utente Windows", () => new CriptoPlugin()),
 ];
 // # ----------------------- #
 
@@ -194,6 +196,6 @@ static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryB
     ConsolePlus.Write($"[Gray]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
     ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
 }
-// # -------------------------------- #
-// dotnet publish -c Release -r win-x64
-// # -------------------------------- #
+// # -------------------------- #
+// dotnet build /t:PublishRelease
+// # -------------------------- #

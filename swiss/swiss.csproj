@@ -5,13 +5,36 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+
 		<PublishAot>true</PublishAot>
 		<PublishDir>C:\Users\g2004\Desktop\Tools</PublishDir>
+
 		<StripSymbols>true</StripSymbols>
 		<ConsoleFullSymbolStackTraces>false</ConsoleFullSymbolStackTraces>
 		<StackTraceSupport>false</StackTraceSupport>
 		<InvariantGlobalization>true</InvariantGlobalization>
+
+		<OptimizationPreference>Size</OptimizationPreference>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="plugins\mdconverter\assets\md.min.css" />
+		<None Remove="plugins\mdconverter\assets\md.scss" />
+	</ItemGroup>
+
+	<Target Name="CompileSass" BeforeTargets="BeforeBuild;PrepareForBuild">
+		<Message Importance="high" Text="[Swiss] Compilazione Sass in corso..." />
+		<Exec Command="sass plugins\mdconverter\assets\md.scss:plugins\mdconverter\assets\md.min.css --style compressed --no-source-map" />
+	</Target>
+
+	<Target Name="PublishRelease">
+		<CallTarget Targets="CompileSass" />
+		<Message Importance="high" Text="[Swiss] Avvio Pubblicazione Native AOT in corso..." />
+
+		<Exec Command="dotnet publish -c Release -r win-x64 --self-contained true --nologo -v:m -p:WarningLevel=0 -clp:NoSummary" />
+
+		<Message Importance="high" Text="[Swiss] Missile AOT pronto in: $(PublishDir)" />
+	</Target>
 
 	<ItemGroup>
 		<Compile Update="Properties\Resources.Designer.cs">
@@ -26,6 +49,10 @@
 			<Generator>ResXFileCodeGenerator</Generator>
 			<LastGenOutput>Resources.Designer.cs</LastGenOutput>
 		</EmbeddedResource>
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.5" />
 	</ItemGroup>
 
 </Project>

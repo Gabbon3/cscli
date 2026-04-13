@@ -13,6 +13,7 @@ namespace plugins.mdconverter
 
         private bool InParagraph = false;
         private bool InCodeBlock = false;
+        private bool InMathBlock = false;
         private bool IsFirstCodeLine = false;
         private bool IsMermaid = false;
         private bool InTable = false;
@@ -126,10 +127,8 @@ namespace plugins.mdconverter
         themeVariables: {{ fontFamily: 'Roboto, sans-serif' }}
     }});
 </script>");
-            // CSS
-            await writer.WriteLineAsync("<style>");
-            await writer.WriteLineAsync(":root{--bc:#fff;--hr:#ddd;--color:#151515;--main:#151515;--code-bc:#f1f1f1;--blockquote-border:#dfe2e5;--blockquote-bc:#f6f8fa;--blockquote-color:#24292f;--note:#0969da;--tip:#1a7f37;--important:#8250df;--warning:#9a6700;--caution:#d1242f}html.dark{--bc:#111;--hr:#333;--color:#eee;--main:#eee;--code-bc:#1c1c1c;--blockquote-border:#30363d;--blockquote-bc:#161b22;--blockquote-color:#d0d7de;--note:#2f81f7;--tip:#3fb950;--important:#a371f7;--warning:#d29922;--caution:#f85149}*{box-sizing:border-box}body,html{background-color:var(--bc);-webkit-print-color-adjust:exact;print-color-adjust:exact}body{margin:0 auto;padding:20px 40px;font-family:Roboto,Helvetica,sans-serif;line-height:1.6;color:var(--color);max-width:900px}h1,h2,h3{color:var(--main);font-weight:600}h1{border-bottom:2px solid var(--hr);margin-bottom:.3em;padding-bottom:.1em}h2{border-bottom:1px solid var(--hr);margin-bottom:.2em;padding-bottom:.1em}hr{border:none;background-color:var(--hr);height:2px;margin:2em 0}ol,p,ul{margin:1em 0}ol,ul{padding-inline-start:25px}pre,pre code{font-family:\"JetBrains Mono\",monospace!important;tab-size:4;font-size:.9em!important}pre{background-color:var(--code-bc);padding:15px;border-radius:8px;overflow-x:auto;border:1px solid var(--hr)}:not(pre)>code{background-color:var(--code-bc);font-family:\"JetBrains Mono\",monospace!important;font-size:.9em;padding:2px 5px;border-radius:4px;color:var(--main)}.mermaid{background-color:transparent;padding:10px;border-radius:8px;margin:20px 0;text-align:center}.material-symbols-rounded{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;font-size:1.2em;width:1em;height:1em;position:relative;top:-.05em}blockquote{border-left:.25em solid var(--blockquote-border);background-color:var(--blockquote-bc);color:var(--blockquote-color);padding:.6em 1.2em;margin:1.5em 0;border-radius:0 6px 6px 0}blockquote[class^=alert-]{border-left-width:.35em}blockquote[class^=alert-]::before{font-family:'Material Symbols Rounded';margin-right:8px;vertical-align:middle;font-size:1.2em}.alert-note{border-left-color:var(--note)!important}.alert-note::before{content:'info';color:var(--note)}.alert-tip{border-left-color:var(--tip)!important}.alert-tip::before{content:'lightbulb';color:var(--tip)}.alert-warning{border-left-color:var(--warning)!important}.alert-warning::before{content:'warning';color:var(--warning)}.alert-caution{border-left-color:var(--caution)!important}.alert-caution::before{content:'report';color:var(--caution)}.alert-important{border-left-color:var(--important)!important}.alert-important::before{content:'priority_high';color:var(--important)}table{border-collapse:collapse;width:100%;margin:20px 0;border:1px solid var(--hr)}td,th{padding:10px 14px;border:1px solid var(--hr);text-align:left}th{background-color:var(--code-bc);font-weight:700}tr:nth-child(even){background-color:rgba(128,128,128,.04)}.math-block{text-align:center;margin:1.5em 0;font-size:1.1em}");
-            await writer.WriteLineAsync("</style>\n</head>\n<body>");
+            // CSS e apertura body
+            await writer.WriteLineAsync($"<style>{GetEmbeddedCss()}</style>\n</head>\n<body>");
 
             // utility
             // regex per matchare liste non ordinate e ordinate
@@ -208,11 +207,36 @@ namespace plugins.mdconverter
                     await writer.WriteLineAsync($"<h{level}>{content}</h{level}>");
                     continue;
                 }
-                // # KATEX
+                // # MATH BLOCK
+                // se sono gia dentro un blocco matematico
+                if (InMathBlock)
+                {
+                    // verifico se devo chiuderlo
+                    if (line.EndsWith("$$"))
+                    {
+                        InMathBlock = false;
+                        await writer.WriteLineAsync($"{line}</div>");
+                    }
+                    else // scrivo la linea matematica
+                    {
+                        await writer.WriteLineAsync(line);
+                    }
+                    continue;
+                }
+                // se non sono in un blocco matematico
                 if (line.StartsWith("$$"))
                 {
-                    CloseTags(writer);
-                    await writer.WriteAsync($"<div class=\"math-block\">{line}</div>");
+                    // verifico se il blocco matematico si trova sulla stessa linea
+                    if (line.EndsWith("$$") && line.Length > 2)
+                    {
+                        CloseTags(writer);
+                        await writer.WriteAsync($"<div class=\"math-block\">{line}</div>");
+                    }
+                    else // se no significa che devo aprire un blocco matematico nuovo
+                    {
+                        InMathBlock = true;
+                        await writer.WriteLineAsync($"<div class=\"math-block\">{line}");
+                    }
                     continue;
                 }
                 // # LISTE
@@ -344,13 +368,13 @@ namespace plugins.mdconverter
 
         private void CountIndent(string line)
         {
-            int tabs = 0;
+            int spaces = 0;
             foreach (char c in line)
             {
-                if (c == '\t') tabs++;
+                if (c == ' ' || c == '\t') spaces++;
                 else break;
             }
-            CurrentIndent = tabs;
+            CurrentIndent = spaces;
         }
 
         private void CloseTags(StreamWriter writer)
@@ -358,11 +382,12 @@ namespace plugins.mdconverter
             if (InParagraph) { writer.WriteLine("</p>"); InParagraph = false; }
             if (InTable) { writer.WriteLine("</tbody></table>"); InTable = false; }
             if (InBlockquote) { writer.WriteLine("</blockquote>"); InBlockquote = false; }
+            if (InMathBlock) { writer.WriteLine("</div>"); InMathBlock = false; }
             while (ListStack.Count > 0)
             {
                 writer.WriteLine(ListStack.Pop().tag);
             }
-            CurrentIndent = -1;
+            CurrentIndent = 0;
         }
 
         private string ParseInline(string text)
@@ -519,6 +544,15 @@ namespace plugins.mdconverter
                 NativeIO.DeleteFile(htmlFilePath);
             }
             return true;
+        }
+
+        private string GetEmbeddedCss()
+        {
+            var assembly = typeof(MdConverterPlugin).Assembly;
+            string resourceName = "swiss.plugins.mdconverter.assets.md.min.css";
+            using Stream stream = assembly.GetManifestResourceStream(resourceName)!;
+            using StreamReader reader = new(stream);
+            return reader.ReadToEnd();
         }
 
         public override void Help()
