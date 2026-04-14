@@ -12,12 +12,13 @@ using plugins.eliminator;
 using plugins.count;
 using plugins.mdconverter;
 using plugins.cripto;
+using plugins.grep;
 // # ----------------------- #
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.7";
-const string versionDescription = "Cripto Plugin - nuovo plugin per cifrare e decifrare file usando DPAPI";
+const string version = "1.8.8";
+const string versionDescription = "Grep Plugin - nuovo plugin che sogna ripgrep";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -42,6 +43,7 @@ List<PluginRegistration> plugins = [
     new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
     new("cripto", "Effettua la crittografia su file o cartelle legata all'utente Windows", () => new CriptoPlugin()),
+    new("grep", "Plugin che si bagna pensando a ripgrep", () => new GrepPlugin()),
 ];
 // # ----------------------- #
 

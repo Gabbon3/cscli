@@ -92,7 +92,11 @@ namespace stack
                                             if (options.RecurseSubdirectories)
                                             {
                                                 Interlocked.Increment(ref pendingWork);
-                                                dirChannel.Writer.TryWrite(entry.ToFullPath());
+                                                // garantisco coerenza
+                                                if (!dirChannel.Writer.TryWrite(entry.ToFullPath()))
+                                                {
+                                                    Interlocked.Decrement(ref pendingWork);
+                                                }
                                             }
                                             return options.ReturnDirectoriesInOutput;
                                         }

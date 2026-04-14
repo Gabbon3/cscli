@@ -9,7 +9,7 @@ namespace plugins.filefinder
         public override string Name => "find";
         public override string Description => "Ricerca di file tramite regex o stringhe fisse";
 
-        private static readonly object _consoleLock = new();
+        private static readonly Lock _consoleLock = new();
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
