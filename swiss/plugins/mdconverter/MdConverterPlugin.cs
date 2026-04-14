@@ -100,14 +100,17 @@ namespace plugins.mdconverter
             await writer.WriteLineAsync("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js\"></script>");
             // - Autoloader per multilinguaggio
             await writer.WriteLineAsync("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js\"></script>");
+            // - Linenumbers
+            await writer.WriteLineAsync("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js\"></script>");
+            await writer.WriteLineAsync("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css\" />");
             // tema del codice
             if (darkMode)
             {
-                await writer.WriteLineAsync("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-one-dark.min.css\" crossorigin=\"anonymous\" referrerpolicy=\"no-referrer\"/>");
+                await writer.WriteLineAsync("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-one-dark.min.css\" />");
             }
             else
             {
-                await writer.WriteLineAsync("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-one-light.min.css\" crossorigin=\"anonymous\" referrerpolicy=\"no-referrer\" />");
+                await writer.WriteLineAsync("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-one-light.min.css\" />");
             }
             // Font di google
             await writer.WriteLineAsync("<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\r\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\r\n<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap\" rel=\"stylesheet\">");
@@ -128,7 +131,7 @@ namespace plugins.mdconverter
     }});
 </script>");
             // CSS e apertura body
-            await writer.WriteLineAsync($"<style>{GetEmbeddedCss()}</style>\n</head>\n<body>");
+            await writer.WriteLineAsync($"<style>{GetEmbeddedCss()}</style>\n</head>\n<body class='line-numbers'>");
 
             // utility
             // regex per matchare liste non ordinate e ordinate

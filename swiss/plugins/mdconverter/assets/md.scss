@@ -1,14 +1,23 @@
 // Variabili e Temi
-$alerts: ( "note": var(--note), "tip": var(--tip), "important": var(--important), "warning": var(--warning), "caution": var(--caution) );
+$alerts: (
+    "note": var(--note),
+    "tip": var(--tip),
+    "important": var(--important),
+    "warning": var(--warning),
+    "caution": var(--caution)
+);
 
 @page {
     margin: 0.8cm 0;
 }
 
 :root {
+    --font-size: 1em;
+    --code-font-size: calc(var(--font-size) - .1em);
     --bc: #fff;
     --hr: #ddd;
     --color: #151515;
+    --code-line-index-color: #686868;
     --main: #151515;
     --code-bc: #f1f1f1;
     --blockquote-border: #dfe2e5;
@@ -25,6 +34,7 @@ html.dark {
     --bc: #111;
     --hr: #333;
     --color: #eee;
+    --code-line-index-color: #8e8e8e;
     --main: #eee;
     --code-bc: #1c1c1c;
     --blockquote-border: #30363d;
@@ -41,7 +51,8 @@ html.dark {
     box-sizing: border-box;
 }
 
-body, html {
+body,
+html {
     background-color: var(--bc);
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
@@ -52,25 +63,18 @@ body {
     padding: 20px 40px;
     font-family: 'Roboto', Helvetica, sans-serif;
     line-height: 1.6;
+    font-size: var(--font-size);
     color: var(--color);
     max-width: 900px;
 }
 
-h1, h2, h3 {
-    color: var(--main);
-    font-weight: 600;
-}
-
-h1, h2 {
+h1,
+h2,
+h3 {
     border-bottom: 1px solid var(--hr);
+    color: var(--main);
     padding-bottom: .1em;
     margin-bottom: .3em;
-}
-
-pre, pre code {
-    font-family: "JetBrains Mono", monospace !important;
-    tab-size: 4;
-    font-size: .9em !important;
 }
 
 pre {
@@ -78,15 +82,37 @@ pre {
     padding: 15px;
     border-radius: 8px;
     border: 1px solid var(--hr);
-    overflow-x: auto;
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+    counter-reset: line;
 }
 
-:not(pre) code {
+pre,
+pre code {
+    font-family: "JetBrains Mono", monospace !important;
+    tab-size: 4;
+    font-size: var(--code-font-size) !important;
+    display: block;
+    white-space: pre-wrap !important;
+}
+
+// pre.line-numbers {
+//     padding-left: 2.5em !important;
+// }
+
+.line-numbers .line-numbers-rows {
+    // width: 1.6em !important;
+    // left: -2.1em !important;
+    // line-height: 1.5;
+    border-right: 1px dotted var(--hr) !important;
+}
+
+:not(pre) > code {
     padding: 2px;
     border-radius: 3px;
     font-family: "JetBrains Mono", monospace !important;
     background-color: var(--code-bc);
-    font-size: .9em !important;
+    font-size: var(--code-font-size) !important;
 }
 
 blockquote {
@@ -95,7 +121,7 @@ blockquote {
     color: var(--blockquote-color);
     padding: .6em 1.2em;
     margin: 1.5em 0;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 8px 8px 0;
 
     &[class^=alert-] {
         border-left-width: .35em;
@@ -115,7 +141,7 @@ blockquote {
 
         &::before {
             color: $color;
-            content: if($name == 'note', 'info', if($name == 'tip', 'lightbulb', if($name == 'warning', 'warning', if($name == 'caution', 'report', 'priority_high'))));
+            content: if($name =='note', 'info', if($name =='tip', 'lightbulb', if($name =='warning', 'warning', if($name =='caution', 'report', 'priority_high'))));
         }
     }
 }
@@ -131,19 +157,20 @@ table {
         font-weight: 700;
     }
 
-    td, th {
+    td,
+    th {
         padding: 10px 14px;
         border: 1px solid var(--hr);
         text-align: left;
     }
 
     tr:nth-child(even) {
-        background-color: rgba(128,128,128,.04);
+        background-color: rgba(128, 128, 128, .04);
     }
 }
 
 .math-block {
     text-align: center;
     margin: 1.5em 0;
-    font-size: 1.1em;
+    font-size: calc(var(--font-size) + .1em);
 }
