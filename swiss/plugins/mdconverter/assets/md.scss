@@ -17,6 +17,7 @@ $alerts: (
     --bc: #fff;
     --hr: #ddd;
     --color: #151515;
+    --a-color: #3f8de8;
     --code-line-index-color: #686868;
     --main: #151515;
     --code-bc: #f1f1f1;
@@ -96,18 +97,19 @@ pre code {
     white-space: pre-wrap !important;
 }
 
-// pre.line-numbers {
-//     padding-left: 2.5em !important;
-// }
+a {
+    color: var(--a-color);
+
+    &:hover {
+        text-decoration: underline;
+    }
+}
 
 .line-numbers .line-numbers-rows {
-    // width: 1.6em !important;
-    // left: -2.1em !important;
-    // line-height: 1.5;
     border-right: 1px dotted var(--hr) !important;
 }
 
-:not(pre) > code {
+:not(pre)>code {
     padding: 2px;
     border-radius: 3px;
     font-family: "JetBrains Mono", monospace !important;

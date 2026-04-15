@@ -2,7 +2,8 @@ using System.IO.Enumeration;
 using System.Threading.Channels;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
-using utils;
+using utils.console;
+using System.Runtime.CompilerServices;
 
 namespace plugins.grep
 {
@@ -25,8 +26,17 @@ namespace plugins.grep
             "vendor",                               // Go / PHP
             ".cargo",                               // Rust
         };
-        // lock per la stampa dei match a console
-        private static readonly Lock _consoleLock = new();
+        // Record per gestire il match
+        private readonly struct GrepMatch(string path, int lineNumber, string formattedContext) : IPrintable
+        {
+            public string ToFormattedString()
+            {
+                string? directory = Path.GetDirectoryName(path);
+                string? fileName = Path.GetFileName(path);
+                return $"[Green]#[/] [DarkGray]{directory}{Path.DirectorySeparatorChar}[/][Cyan]{fileName}[/]\n[Green]# [Yellow]{lineNumber}:[/] {formattedContext}\n[DarkGray]#[/]";
+            }
+        }
+        private FastPrinter<GrepMatch> _fastPrinter = new();
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
@@ -76,13 +86,13 @@ namespace plugins.grep
                 }
             }
             // pattern glob per escludere files
-            var excludeGlobs = new List<string>();
+            var includeGlobs = new List<string>();
             var GlobOptions = options.TryGetValue("--glob", out string? gl1) ? gl1 : options.TryGetValue("-g", out string? gl2) ? gl2 : null;
             if (!string.IsNullOrEmpty(GlobOptions))
             {
                 foreach (var glob in GlobOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    excludeGlobs.Add(glob.Trim());
+                    includeGlobs.Add(glob.Trim());
                 }
             }
 
@@ -94,6 +104,9 @@ namespace plugins.grep
                 SingleWriter = true,
                 SingleReader = false
             });
+
+            // avvio il printer ad alte prestazioni sulla console
+            _fastPrinter.Run(ct);
 
             // # --------------------- #
             // # 2. Preparo gli operai #
@@ -136,19 +149,19 @@ namespace plugins.grep
                 {
                     if (entry.IsDirectory) return false;
                     // se non ci sono filtri passo tutto
-                    if (excludeGlobs.Count == 0) return true;
+                    if (includeGlobs.Count == 0) return true;
 
                     ReadOnlySpan<char> fileName = entry.FileName;
                     // per ogni regola di esclusione la verifico
-                    foreach (var glob in excludeGlobs)
+                    foreach (var glob in includeGlobs)
                     {
                         if (FileSystemName.MatchesSimpleExpression(glob, fileName, ignoreCase: true))
                         {
-                            return false;
+                            return true;
                         }
                     }
-                    // il file passa a priori
-                    return true;
+                    // qui il file non ha superato nessun match
+                    return false;
                 },
                 // qui filtriamo le cartelle da includere nella ricorsione
                 ShouldRecursePredicate = (ref FileSystemEntry entry) =>
@@ -179,6 +192,7 @@ namespace plugins.grep
             }
 
             await Task.WhenAll(workers);
+            await _fastPrinter.Complete();
         }
 
         private void ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap)
@@ -235,7 +249,10 @@ namespace plugins.grep
 
                     if (matchIndex != -1)
                     {
-                        PrintMatch(path);
+                        int lineNumber = CountLines(searchSpan[..matchIndex]);
+                        ReadOnlySpan<byte> originalDataSpan = buffer.AsSpan(0, currentDataLength);
+                        string contextStr = ExtractMatchContext(originalDataSpan, matchIndex, Pattern.Length, 50);
+                        _fastPrinter.TryPost(new GrepMatch(path, lineNumber, contextStr));
                         break;
                     }
 
@@ -260,20 +277,91 @@ namespace plugins.grep
             }
         }
 
-        // Normalizzazione ASCII inline, zero heap
-        [System.Runtime.CompilerServices.MethodImpl(
-            System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-        private static byte ToLowerAscii(byte b)
-            => (b >= 65 && b <= 90) ? (byte)(b | 0x20) : b;
-
-        private static void PrintMatch(string path)
+        /// <summary>
+        /// Restituisce la stringa gia con i colori del match trovato
+        /// </summary>
+        /// <param name="span"></param>
+        /// <param name="matchIndex"></param>
+        /// <param name="patternLength"></param>
+        /// <param name="maxContext"></param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static string ExtractMatchContext(ReadOnlySpan<byte> span, int matchIndex, int patternLength, int maxContext = 50)
         {
-            lock (_consoleLock)
+            int start = Math.Max(0, matchIndex - maxContext);
+            int endMatch = matchIndex + patternLength;
+            int end = Math.Min(endMatch + maxContext, span.Length);
+
+            var leftSpan = span[start..matchIndex];
+            int preNewLine = leftSpan.LastIndexOf((byte)'\n');
+            int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
+            bool truncatedLeft = preNewLine == -1 && start > 0;
+
+            var rightSpan = span[endMatch..end];
+            int postNewLine = rightSpan.IndexOf((byte)'\n');
+            int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
+            if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
+            bool truncatedRight = postNewLine == -1 && end < span.Length;
+
+            var exactLeft = span[actualStart..matchIndex];
+            var exactMatch = span[matchIndex..endMatch];
+            var exactRight = span[endMatch..actualEnd];
+
+            // +14 per i ... (6) e i tag colore (8)
+            Span<char> buffer = stackalloc char[actualEnd - actualStart + 14];
+            int pos = 0;
+
+            // prefisso
+            if (truncatedLeft)
             {
-                string dir = Path.GetDirectoryName(path) + Path.DirectorySeparatorChar;
-                string file = Path.GetFileName(path);
-                ConsolePlus.Write($"[Green]# [DarkGray]{dir}[/][Cyan]{file}[/]");
+                "...".AsSpan().CopyTo(buffer[pos..]);
+                pos += 3;
             }
+
+            // decodifico sinistra
+            int leftChars = Encoding.UTF8.GetChars(exactLeft, buffer[pos..]);
+            pos += leftChars;
+
+            // tag rosso e match
+            "[Red]".AsSpan().CopyTo(buffer[pos..]);
+            pos += 5;
+
+            int matchChars = Encoding.UTF8.GetChars(exactMatch, buffer[pos..]);
+            pos += matchChars;
+
+            "[/]".AsSpan().CopyTo(buffer[pos..]);
+            pos += 3;
+
+            // decodifico destra
+            int rightChars = Encoding.UTF8.GetChars(exactRight, buffer[pos..]);
+            pos += rightChars;
+
+            // suffisso
+            if (truncatedRight)
+            {
+                "...".AsSpan().CopyTo(buffer[pos..]);
+                pos += 3;
+            }
+
+            return new string(buffer[..pos]);
+        }
+
+        /// <summary>
+        /// Restituisce il numero di riga del match
+        /// </summary>
+        /// <param name="span"></param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int CountLines(ReadOnlySpan<byte> span)
+        {
+            int count = 0;
+            int index;
+            while ((index = span.IndexOf((byte)'\n')) != -1)
+            {
+                count++;
+                span = span[(index + 1)..];
+            }
+            return count;
         }
 
         public override void Help()

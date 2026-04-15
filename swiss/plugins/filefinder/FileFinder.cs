@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 using stack;
-using utils;
+using utils.console;
 
 namespace plugins.filefinder
 {

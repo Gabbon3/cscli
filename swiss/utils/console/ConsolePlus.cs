@@ -1,4 +1,4 @@
-namespace utils;
+namespace utils.console;
 
 public static class ConsolePlus
 {

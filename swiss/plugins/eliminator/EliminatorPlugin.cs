@@ -3,6 +3,7 @@ using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using utils;
+using utils.console;
 using stack;
 
 namespace plugins.eliminator
