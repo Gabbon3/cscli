@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 using utils.console;
 using System.Runtime.CompilerServices;
+using utils.text;
 
 namespace plugins.grep
 {
@@ -11,8 +12,13 @@ namespace plugins.grep
     {
         public override string Name => "grep";
         public override string Description => "Plugin che si bagna pensando a ripgrep";
-        private byte[] Pattern = [];
+        // Lunghezza del pattern di ricerca piu lungo per gestire overlap
+        private int LongestPattern = 0;
+        // Lunghezza di tutti i pattern
+        private int[] PatternLengths = [];
         private bool IgnoreCase = false;
+        // motore di ricerca di grep (usato per ricerca di piu parole insieme)
+        AhoCorasick? AhoEngine;
         // # ------------------------------- #
         // # Cartelle da ignorare di default #
         // # ------------------------------- #
@@ -26,6 +32,24 @@ namespace plugins.grep
             "vendor",                               // Go / PHP
             ".cargo",                               // Rust
         };
+        private readonly struct AhoMatchHandler(string path, byte[] buffer, int currentDataLength, int chunkStartLine, int[] patternLengths, FastPrinter<GrepMatch> printer) : IMatchHandler
+        {
+            private readonly string _path = path;
+            private readonly byte[] _buffer = buffer;
+            private readonly int _currentDataLength = currentDataLength;
+            private readonly int _chunkStartLine = chunkStartLine;
+            private readonly int[] _patternLengths = patternLengths;
+            private readonly FastPrinter<GrepMatch> _printer = printer;
+
+            public void OnMatch(int startIndex, int endIndex, int patternIndex, int relativeLine)
+            {
+                int patLen = _patternLengths[patternIndex];
+                ReadOnlySpan<byte> originalDataSpan = _buffer.AsSpan(0, _currentDataLength);
+                int lineNumber = _chunkStartLine + relativeLine;
+                string contextStr = ExtractMatchContext(originalDataSpan, startIndex, patLen, maxContext: 50);
+                _printer.TryPost(new GrepMatch(_path, lineNumber, contextStr));
+            }
+        }
         // Record per gestire il match
         private readonly struct GrepMatch(string path, int lineNumber, string formattedContext) : IPrintable
         {
@@ -33,7 +57,7 @@ namespace plugins.grep
             {
                 string? directory = Path.GetDirectoryName(path);
                 string? fileName = Path.GetFileName(path);
-                return $"[Green]#[/] [DarkGray]{directory}{Path.DirectorySeparatorChar}[/][Cyan]{fileName}[/]\n[Green]# [Yellow]{lineNumber}:[/] {formattedContext}\n[DarkGray]#[/]";
+                return $"[Green]#[/] [DarkGray]{directory}{Path.DirectorySeparatorChar}[/][Cyan]{fileName}[/]\n[Green]# [Yellow]{lineNumber}:[/] {formattedContext}\n[DarkGray]*\n*[/]";
             }
         }
         private FastPrinter<GrepMatch> _fastPrinter = new();
@@ -61,11 +85,23 @@ namespace plugins.grep
                 PrintError("Il pattern di ricerca non può essere vuoto.");
                 return;
             }
+            // preparo il pattern per AhoChorasick
+            string[] wordsToSearch = pattern.Split('|', StringSplitOptions.RemoveEmptyEntries);
+            LongestPattern = wordsToSearch[0].Length;
             // # --------------------- #
             // # Parsing delle opzioni #
             // # --------------------- #
             IgnoreCase = options.ContainsKey("--ignore-case") || options.ContainsKey("-i");
-            Pattern = Encoding.UTF8.GetBytes(IgnoreCase ? pattern.ToLowerInvariant() : pattern);
+            var patternList = new ReadOnlyMemory<byte>[wordsToSearch.Length];
+            PatternLengths = new int[wordsToSearch.Length]; // Inizializza l'array
+
+            for (int i = 0; i < wordsToSearch.Length; i++)
+            {
+                PatternLengths[i] = wordsToSearch[i].Length; // Salva la lunghezza
+                if (wordsToSearch[i].Length > LongestPattern) LongestPattern = wordsToSearch[i].Length;
+                patternList[i] = Encoding.UTF8.GetBytes(IgnoreCase ? wordsToSearch[i].ToLowerInvariant() : wordsToSearch[i]);
+            }
+
             // cartelle da escludere
             var excludeDirs = new HashSet<string>(DefaultExcludeDirs, StringComparer.OrdinalIgnoreCase);
             var excludeDirsOptions = options.TryGetValue("--exclude-dir", out string? ed1) ? ed1 : options.TryGetValue("-ex", out string? ed2) ? ed2 : null;
@@ -76,6 +112,7 @@ namespace plugins.grep
                     excludeDirs.Add(dir.Trim());
                 }
             }
+
             // cartelle da includere rispetto a quelle di default
             var includeDirsOptions = options.TryGetValue("--include-dir", out string? id1) ? id1 : options.TryGetValue("-in", out string? id2) ? id2 : null;
             if (!string.IsNullOrEmpty(includeDirsOptions))
@@ -85,6 +122,7 @@ namespace plugins.grep
                     excludeDirs.Remove(dir.Trim());
                 }
             }
+
             // pattern glob per escludere files
             var includeGlobs = new List<string>();
             var GlobOptions = options.TryGetValue("--glob", out string? gl1) ? gl1 : options.TryGetValue("-g", out string? gl2) ? gl2 : null;
@@ -95,6 +133,9 @@ namespace plugins.grep
                     includeGlobs.Add(glob.Trim());
                 }
             }
+
+            // inizializzo l'automa di AhoCorasick solo dopo aver validato tutto
+            AhoEngine = new AhoCorasick(patternList);
 
             // # ---------------------- #
             // # 1. Preparo il producer #
@@ -113,7 +154,6 @@ namespace plugins.grep
             // # --------------------- #
             int threads = Environment.ProcessorCount;
             var workers = new Task[threads];
-            int overlap = Pattern.Length - 1;
 
             for (int i = 0; i < threads; i++)
             {
@@ -124,7 +164,7 @@ namespace plugins.grep
 
                     await foreach (var path in filesChannel.Reader.ReadAllAsync(ct))
                     {
-                        ProcessFile(path, workerBuffer, lowerBuffer, overlap);
+                        ProcessFile(path, workerBuffer, lowerBuffer, LongestPattern);
                     }
                 }, ct);
             }
@@ -200,30 +240,25 @@ namespace plugins.grep
             SafeFileHandle? handle = null;
             try
             {
-                // API OS-Level: bypassa FileStream. Apre un handle sicuro al file.
-                // SequentialScan dice al Kernel di caricare i blocchi successivi in cache hardware.
                 handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
-
                 long fileLength = RandomAccess.GetLength(handle);
                 if (fileLength == 0) return;
 
                 long fileOffset = 0;
                 int leftover = 0;
-
-                // controllo se questo è un file binario
+                int totalLines = 1;
                 bool isFirstChunk = true;
 
                 while (fileOffset < fileLength)
                 {
-                    // leggo la porzione di file calcolando lo spazio libero nel buffer
                     int bytesToRead = (int)Math.Min(buffer.Length - leftover, fileLength - fileOffset);
-                    // RandomAccess legge direttamente tramite handle OS dello span
                     int bytesRead = RandomAccess.Read(handle, buffer.AsSpan(leftover, bytesToRead), fileOffset);
                     if (bytesRead == 0) break;
 
                     int currentDataLength = bytesRead + leftover;
                     ReadOnlySpan<byte> dataSpan = buffer.AsSpan(0, currentDataLength);
-                    // Se è il primo blocco e contiene un byte 0, allora è un binario/video/exe
+
+                    // controllo se si tratta di un file binario
                     if (isFirstChunk)
                     {
                         if (dataSpan.Contains((byte)0)) return;
@@ -231,40 +266,37 @@ namespace plugins.grep
                     }
 
                     ReadOnlySpan<byte> searchSpan;
-
                     if (IgnoreCase)
                     {
-                        var sourceSpan = buffer.AsSpan(0, currentDataLength);
                         var destSpan = lowerBuffer.AsSpan(0, currentDataLength);
-                        // uso le istruzioni SIMD
-                        Ascii.ToLower(sourceSpan, destSpan, out _);
+                        Ascii.ToLower(dataSpan, destSpan, out _);
                         searchSpan = destSpan;
                     }
                     else
                     {
-                        searchSpan = buffer.AsSpan(0, currentDataLength);
+                        searchSpan = dataSpan;
                     }
 
-                    int matchIndex = searchSpan.IndexOf(Pattern);
+                    // creo l'handler passando tutto il necessario
+                    var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter);
 
-                    if (matchIndex != -1)
-                    {
-                        int lineNumber = CountLines(searchSpan[..matchIndex]);
-                        ReadOnlySpan<byte> originalDataSpan = buffer.AsSpan(0, currentDataLength);
-                        string contextStr = ExtractMatchContext(originalDataSpan, matchIndex, Pattern.Length, 50);
-                        _fastPrinter.TryPost(new GrepMatch(path, lineNumber, contextStr));
-                        break;
-                    }
+                    // inizio la ricerca con AhoCorasick e itero su tutti i byte
+                    AhoEngine!.Search(searchSpan, ref handler);
 
+                    // gestione leftover
                     if (currentDataLength > overlap)
                     {
                         leftover = overlap;
-                        searchSpan[(currentDataLength - overlap)..].CopyTo(buffer);
+                        dataSpan[(currentDataLength - overlap)..].CopyTo(buffer);
                     }
                     else
                     {
                         leftover = currentDataLength;
                     }
+
+                    // conto il numero di righe presenti in questo blocco di ricerca
+                    int consumedLength = currentDataLength - leftover;
+                    totalLines += CountLines(dataSpan[..consumedLength]);
 
                     fileOffset += bytesRead;
                 }
@@ -368,6 +400,7 @@ namespace plugins.grep
         {
             ConsolePlus.Write("[Cyan]#[DarkGray] ------------------------------------------------ [Cyan]#[/]");
             ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]grep [DarkGray]<percorso> <pattern> [opzioni]");
+            ConsolePlus.Write("[Cyan]#[/] <pattern>                   : cerca più parole contemporaneamente separandole con [Cyan]|[/]");
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
             ConsolePlus.Write("[Cyan]#[/]   --ignore-case, -i         : Ricerca case insensitive (ASCII)");
             ConsolePlus.Write("[Cyan]#[/]   --exclude-dir <dir,...>   : Aggiunge cartelle da escludere");

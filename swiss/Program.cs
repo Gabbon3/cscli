@@ -17,8 +17,8 @@ using plugins.grep;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.8";
-const string versionDescription = "Grep Plugin - nuovo plugin che sogna ripgrep";
+const string version = "1.8.9";
+const string versionDescription = "Grep Plugin - AhoCorasick";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
