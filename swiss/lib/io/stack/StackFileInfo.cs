@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.IO.Enumeration;
 
-namespace stack
+namespace lib.io.stack
 {
     /// <summary>
     /// StackFileInfo è una struct che memorizza le informazioni di un file/cartella utilizzando strutture che vivono

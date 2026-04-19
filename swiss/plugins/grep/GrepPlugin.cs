@@ -2,9 +2,9 @@ using System.IO.Enumeration;
 using System.Threading.Channels;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
-using utils.console;
+using lib.console;
 using System.Runtime.CompilerServices;
-using utils.text;
+using lib.algorithm;
 
 namespace plugins.grep
 {
@@ -32,14 +32,13 @@ namespace plugins.grep
             "vendor",                               // Go / PHP
             ".cargo",                               // Rust
         };
-        private readonly struct AhoMatchHandler(string path, byte[] buffer, int currentDataLength, int chunkStartLine, int[] patternLengths, FastPrinter<GrepMatch> printer) : IMatchHandler
+        private readonly struct AhoMatchHandler(string path, byte[] buffer, int currentDataLength, int chunkStartLine, int[] patternLengths, FastPrinter printer) : IMatchHandler
         {
-            private readonly string _path = path;
             private readonly byte[] _buffer = buffer;
             private readonly int _currentDataLength = currentDataLength;
             private readonly int _chunkStartLine = chunkStartLine;
             private readonly int[] _patternLengths = patternLengths;
-            private readonly FastPrinter<GrepMatch> _printer = printer;
+            private readonly FastPrinter _printer = printer;
 
             public void OnMatch(int startIndex, int endIndex, int patternIndex, int relativeLine)
             {
@@ -47,20 +46,10 @@ namespace plugins.grep
                 ReadOnlySpan<byte> originalDataSpan = _buffer.AsSpan(0, _currentDataLength);
                 int lineNumber = _chunkStartLine + relativeLine;
                 string contextStr = ExtractMatchContext(originalDataSpan, startIndex, patLen, maxContext: 50);
-                _printer.TryPost(new GrepMatch(_path, lineNumber, contextStr));
+                _printer.TryPost($"[Green]#[/] [DarkGray]{Path.GetDirectoryName(path)}{Path.DirectorySeparatorChar}[/][Cyan]{Path.GetFileName(path)}[/]\n[Green]# [Yellow]{lineNumber}:[/] {contextStr}\n[DarkGray]*\n*[/]");
             }
         }
-        // Record per gestire il match
-        private readonly struct GrepMatch(string path, int lineNumber, string formattedContext) : IPrintable
-        {
-            public string ToFormattedString()
-            {
-                string? directory = Path.GetDirectoryName(path);
-                string? fileName = Path.GetFileName(path);
-                return $"[Green]#[/] [DarkGray]{directory}{Path.DirectorySeparatorChar}[/][Cyan]{fileName}[/]\n[Green]# [Yellow]{lineNumber}:[/] {formattedContext}\n[DarkGray]*\n*[/]";
-            }
-        }
-        private FastPrinter<GrepMatch> _fastPrinter = new();
+        private FastPrinter _fastPrinter = new();
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
@@ -78,7 +67,7 @@ namespace plugins.grep
             }
 
             string pattern = args[1];
-            var options = ParseArguments(args, 2);
+            ParseArguments(args, 2);
 
             if (pattern.Length == 0)
             {
@@ -91,7 +80,7 @@ namespace plugins.grep
             // # --------------------- #
             // # Parsing delle opzioni #
             // # --------------------- #
-            IgnoreCase = options.ContainsKey("--ignore-case") || options.ContainsKey("-i");
+            IgnoreCase = OptionsContains("-i", "--ignore-case");
             var patternList = new ReadOnlyMemory<byte>[wordsToSearch.Length];
             PatternLengths = new int[wordsToSearch.Length]; // Inizializza l'array
 
@@ -104,7 +93,7 @@ namespace plugins.grep
 
             // cartelle da escludere
             var excludeDirs = new HashSet<string>(DefaultExcludeDirs, StringComparer.OrdinalIgnoreCase);
-            var excludeDirsOptions = options.TryGetValue("--exclude-dir", out string? ed1) ? ed1 : options.TryGetValue("-ex", out string? ed2) ? ed2 : null;
+            var excludeDirsOptions = GetOptionValue("--exclude-dir", "-ex");
             if (!string.IsNullOrEmpty(excludeDirsOptions))
             {
                 foreach (var dir in excludeDirsOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -114,7 +103,7 @@ namespace plugins.grep
             }
 
             // cartelle da includere rispetto a quelle di default
-            var includeDirsOptions = options.TryGetValue("--include-dir", out string? id1) ? id1 : options.TryGetValue("-in", out string? id2) ? id2 : null;
+            var includeDirsOptions = GetOptionValue("-in", "--include-dir");
             if (!string.IsNullOrEmpty(includeDirsOptions))
             {
                 foreach (var dir in includeDirsOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -125,7 +114,7 @@ namespace plugins.grep
 
             // pattern glob per escludere files
             var includeGlobs = new List<string>();
-            var GlobOptions = options.TryGetValue("--glob", out string? gl1) ? gl1 : options.TryGetValue("-g", out string? gl2) ? gl2 : null;
+            var GlobOptions = GetOptionValue("-g", "--glob");
             if (!string.IsNullOrEmpty(GlobOptions))
             {
                 foreach (var glob in GlobOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -235,6 +224,13 @@ namespace plugins.grep
             await _fastPrinter.Complete();
         }
 
+        /// <summary>
+        /// Processa un file andando a cercare il pattern definito all'inizio con AhoCorasick a blocchi di 64KB
+        /// </summary>
+        /// <param name="path"></param>
+        /// <param name="buffer">Definito in precedenza: byte[] workerBuffer = new byte[65536];</param>
+        /// <param name="lowerBuffer"></param>
+        /// <param name="overlap"></param>
         private void ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap)
         {
             SafeFileHandle? handle = null;

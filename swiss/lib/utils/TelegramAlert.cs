@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace alert
+namespace lib.utils.alert
 {
     public class AlertClient
     {

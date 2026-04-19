@@ -1,7 +1,7 @@
 using System.IO.Enumeration;
 using System.Threading.Channels;
 
-namespace stack
+namespace lib.io
 {
     public delegate T TransformFileSystemEntry<T>(ref FileSystemEntry entry);
 
@@ -98,7 +98,23 @@ namespace stack
                                                     Interlocked.Decrement(ref pendingWork);
                                                 }
                                             }
-                                            return options.ReturnDirectoriesInOutput;
+                                            // non voglio le cartelle in output
+                                            if (!options.ReturnDirectoriesInOutput)
+                                            {
+                                                return false;
+                                            }
+                                            // filtro sulla cartella
+                                            if (options.Filter != null)
+                                            {
+                                                return options.Filter(ref entry);
+                                            }
+
+                                            return true;
+                                        }
+                                        // è un file quindi verifico solo se ci sono filtri
+                                        if (options.Filter != null)
+                                        {
+                                            return options.Filter(ref entry);
                                         }
                                         return true;
                                     }
@@ -132,6 +148,52 @@ namespace stack
             }
             // restituisco appena avvio il channel
             return outputChannel.Reader;
+        }
+
+        /// <summary>
+        /// Cammina il file system in modo sequenziale (Single-Thread, DFS nativo).
+        /// Ideale per gli HDD meccanici o per operazioni dove il multithreading fa da collo di bottiglia.
+        /// </summary>
+        public static IEnumerable<T> WalkSequential<T>(
+            string rootPath,
+            TransformFileSystemEntry<T> transform,
+            FastWalkerOptions? options = null)
+        {
+            options ??= new FastWalkerOptions();
+
+            var localOptions = new EnumerationOptions
+            {
+                IgnoreInaccessible = options.IgnoreInaccessible,
+                RecurseSubdirectories = options.RecurseSubdirectories,
+                BufferSize = options.BufferSize,
+                AttributesToSkip = options.AttributesToSkip,
+                MatchCasing = options.MatchCasing,
+                MatchType = options.MatchType,
+                ReturnSpecialDirectories = false
+            };
+
+            return new FileSystemEnumerable<T>(
+                rootPath,
+                (ref FileSystemEntry entry) => transform(ref entry),
+                localOptions
+            )
+            {
+                ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+                {
+                    // Gestione cartelle
+                    if (entry.IsDirectory)
+                    {
+                        return options.ReturnDirectoriesInOutput;
+                    }
+                    // Factory di filtri
+                    if (options.Filter != null)
+                    {
+                        return options.Filter(ref entry);
+                    }
+
+                    return true;
+                }
+            };
         }
     }
 }

@@ -1,7 +1,8 @@
 using System.IO.Enumeration;
-using stack;
-using utils;
-using utils.console;
+using lib.io;
+using lib.io.stack;
+using lib.utils;
+using lib.console;
 
 namespace plugins.tree
 {

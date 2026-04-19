@@ -1,7 +1,10 @@
-﻿namespace stack
+﻿using System.IO.Enumeration;
+
+namespace lib.io
 {
     public class FastWalkerOptions : EnumerationOptions
     {
+        // Definisco il delegate per gestire il parametro 'ref'
         /// <summary>
         /// Determina se le directory esplorate devono essere restituite nel channel di output.
         /// Se false, verranno restituiti solo i file. Default: true.
@@ -17,6 +20,12 @@
         /// True se chi legge i risultati è un singolo thread (ottimizza le performance del channel).
         /// </summary>
         public bool SingleReader { get; set; } = true;
+
+        /// <summary>
+        /// Filtro personalizzato da applicare ai file. 
+        /// Se restituisce false, il file viene scartato prima di generare allocazioni.
+        /// </summary>
+        public FileSystemFilter? Filter { get; set; }
 
         public FastWalkerOptions()
         {

@@ -1,13 +1,9 @@
 ﻿using System.Diagnostics;
 using plugins;
-using utils.console;
+using lib.console;
 // lista plugins
 using plugins.filefinder;
 using plugins.tree;
-//using plugins.indexer;
-//using plugins.searcher;
-using plugins.eqfile;
-using plugins.findedge;
 using plugins.eliminator;
 using plugins.count;
 using plugins.mdconverter;
@@ -17,8 +13,8 @@ using plugins.grep;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.8.9";
-const string versionDescription = "Grep Plugin - AhoCorasick";
+const string version = "1.9.0";
+const string versionDescription = "Librerie interne ottimizzate";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -35,10 +31,6 @@ Console.CancelKeyPress += (sender, e) =>
 List<PluginRegistration> plugins = [
     new("find", "Cerca file nel file system", () => new FileFinder()),
     new("tree", "Mostra l'albero delle directory", () => new TreePlugin()),
-    //new("indexer", "Indicizza i contenuti per ricerche veloci", () => new IndexerPlugin()),
-    //new("searcher", "Cerca testo all'interno dei file", () => new SearcherPlugin()),
-    new("eqfile", "Confronta file o trova duplicati", () => new EqFilePlugin()),
-    new("findedge", "Trova file con caratteristiche limite", () => new FindEdgePlugin()),
     new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin()),
     new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
@@ -168,35 +160,31 @@ static void Help(List<PluginRegistration> plugins)
 
 static void VersionInfo()
 {
-    ConsolePlus.Write($"[Cyan]# [DarkGray]--------------------- [Cyan]#[/]");
+    ConsolePlus.WriteHr();
     ConsolePlus.Write($"[Cyan]#[/] [Green]{version}[/] - {versionDescription}");
     ConsolePlus.Write($"[Cyan]#[/] Author: [Green]{author}");
-    ConsolePlus.Write($"[Cyan]# [DarkGray]--------------------- [Cyan]#[/]");
+    ConsolePlus.WriteHr();
 }
 
 static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryBytes, long gcMemoryDiff)
 {
-    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
-    Console.WriteLine("# Statistiche esecuzione:");
+    ConsolePlus.WriteHr();
+    ConsolePlus.Write("[Cyan]#[/] Statistiche esecuzione:");
 
     // tempo reale (wall clock)
-    Console.Write("* Tempo Totale:      ");
-    ConsolePlus.Write($"[Cyan]{elapsed.TotalSeconds:N4} s[/]");
+    ConsolePlus.Write($"[Cyan]*[/] Tempo Totale:      [Cyan]{elapsed.TotalSeconds:N4} s[/]");
 
     // tempo cpu (somma di tutti i core)
-    Console.Write("* Tempo CPU:         ");
     double cpuRatio = elapsed.TotalMilliseconds > 0 ? cpuTime.TotalMilliseconds / elapsed.TotalMilliseconds : 0;
-    ConsolePlus.Write($"[Yellow]{cpuTime.TotalSeconds:N4} s (avg {cpuRatio:N1}x core)[/]");
+    ConsolePlus.Write($"[Cyan]*[/] Tempo CPU:         [Yellow]{cpuTime.TotalSeconds:N4} s (avg {cpuRatio:N1}x core)[/]");
 
     // memoria fisica (RAM)
-    Console.Write("* RAM Picco (Phys):  ");
-    ConsolePlus.Write($"[Magenta]{peakMemoryBytes / 1024.0 / 1024.0:N2} MB[/]");
+    ConsolePlus.Write($"[Cyan]*[/] RAM Picco (Phys):  [Magenta]{peakMemoryBytes / 1024.0 / 1024.0:N2} MB[/]");
 
     // memoria managed (GC)
-    Console.Write("* GC Alloc (Delta):  ");
     string sign = gcMemoryDiff >= 0 ? "+" : "";
-    ConsolePlus.Write($"[Gray]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
-    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
+    ConsolePlus.Write($"[Cyan]*[/] GC Alloc (Delta):  [Gray]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
+    ConsolePlus.WriteHr();
 }
 // # -------------------------- #
 // dotnet build /t:PublishRelease

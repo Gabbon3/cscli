@@ -1,7 +1,11 @@
-namespace utils.console;
+namespace lib.console;
 
 public static class ConsolePlus
 {
+    public static void WriteHr(int length = 32)
+    {
+        Write($"[Cyan]#[DarkGray] {new string('-', length)} [Cyan]#[/]");
+    }
     /// <summary>
     /// Stampa a console stringhe colorate, definisci i blocchi di testo all'interno di tag come questi:
     /// [Cyan] ... [/], [Green] ... [/]

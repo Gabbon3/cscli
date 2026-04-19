@@ -1,22 +1,13 @@
 using System.Threading.Channels;
 
-namespace utils.console;
-
-/// <summary>
-/// Interfaccia che deve estesa all'oggetto utilizzato nel channel del FastPrinter
-/// </summary>
-public interface IPrintable
-{
-    string ToFormattedString();
-}
+namespace lib.console;
 
 /// <summary>
 /// Classe utilizzata per stampare a Console ad alte prestazioni utilizzando un channel
 /// </summary>
-/// <typeparam name="T">record / classe che deve estendere obbligatoriamente IPrintable</typeparam>
-public class FastPrinter<T> where T : IPrintable
+public class FastPrinter
 {
-    private readonly Channel<T> _channel;
+    private readonly Channel<string> _channel;
     private Task? _fastPrinterTask;
 
     /// <summary>
@@ -35,11 +26,10 @@ public class FastPrinter<T> where T : IPrintable
     /// <param name="options">opzioni di stampa personalizzate</param>
     public FastPrinter(FastPrinterOptions options)
     {
-        _channel = Channel.CreateBounded<T>(new BoundedChannelOptions(options.Capacity)
+        _channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions()
         {
             SingleReader = true,
-            SingleWriter = options.SingleWriter,
-            FullMode = BoundedChannelFullMode.Wait
+            SingleWriter = options.SingleWriter
         });
     }
     /// <summary>
@@ -58,7 +48,7 @@ public class FastPrinter<T> where T : IPrintable
             {
                 await foreach (var item in _channel.Reader.ReadAllAsync())
                 {
-                    ConsolePlus.Write(item.ToFormattedString());
+                    ConsolePlus.Write(item);
                 }
             }
             catch (OperationCanceledException) { /* operazione cancellata a mano dall'utente */ }
@@ -70,13 +60,13 @@ public class FastPrinter<T> where T : IPrintable
     /// </summary>
     /// <param name="item">item T : IPrintable</param>
     /// <returns></returns>
-    public async ValueTask PostAsync(T item) => await _channel.Writer.WriteAsync(item);
+    public async ValueTask PostAsync(string item) => await _channel.Writer.WriteAsync(item);
     /// <summary>
     /// Prova a posta il contenuto della console nel channel in maniera sincrona, quindi non viene atteso l'inserimento
     /// </summary>
     /// <param name="item">item T : IPrintable</param>
     /// <returns>Se false allora non è stato possibile scrivere nel channel</returns>
-    public bool TryPost(T item) => _channel.Writer.TryWrite(item);
+    public bool TryPost(string item) => _channel.Writer.TryWrite(item);
     /// <summary>
     /// Chiudi il channel e attendo il completamento del task
     /// </summary>

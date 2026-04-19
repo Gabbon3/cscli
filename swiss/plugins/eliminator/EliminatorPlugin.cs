@@ -2,9 +2,10 @@
 using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
-using utils;
-using utils.console;
-using stack;
+using lib.io;
+using lib.utils;
+using lib.console;
+using lib.io.stack;
 
 namespace plugins.eliminator
 {
@@ -35,34 +36,33 @@ namespace plugins.eliminator
                 return;
             }
 
-            var options = ParseArguments(args, 1);
+            ParseArguments(args, 1);
 
             // flag booleani
-            bool isDebug = options.ContainsKey("--debug") || options.ContainsKey("-d");
-            bool isRecursive = options.ContainsKey("--recursive") || options.ContainsKey("-r");
-            bool isRollback = options.ContainsKey("--rollback");
-            bool isForce = options.ContainsKey("--force") || options.ContainsKey("-f") || options.ContainsKey("-y");
-            bool regexIgnoreCase = options.ContainsKey("--ignore-case") || options.ContainsKey("-i");
-            bool targetDirs = options.ContainsKey("--dirs");
-            bool isParallel = options.ContainsKey("--parallel") || options.ContainsKey("-p");
+            bool isDebug = OptionsContains("--debug", "-d");
+            bool isRecursive = OptionsContains("--recursive", "-r");
+            bool isRollback = OptionsContains("--rollback", "-rl");
+            bool isForce = OptionsContains("--force", "-f", "-y");
+            bool regexIgnoreCase = OptionsContains("--ignore-case", "-i");
+            // bool targetDirs = OptionsContains("--dirs");
+            bool isParallel = OptionsContains("--parallel", "-p");
 
             // estrazione chiavi-valori
-            string? regexPattern = options.TryGetValue("--regex", out var r) && r != "true" ? r : null;
-
-            string? backupPath = options.TryGetValue("--backup-path", out var b) && b != "true" ? b : null;
+            string? regexPattern = GetOptionValue("--regex");
+            string? backupPath = GetOptionValue("--backup-path");
 
             int? olderThanDays = null;
-            if (options.TryGetValue("--older-than", out var otStr) && otStr != "true")
+            if (Options.TryGetValue("--older-than", out var otStr) && otStr != "true")
             {
                 if (int.TryParse(otStr, out int days) && days >= 0) olderThanDays = days;
                 else { PrintError("Il valore di --older-than deve essere un numero intero positivo."); return; }
             }
 
-            string dateType = options.TryGetValue("--date-type", out var dt) && dt != "true" ? dt.ToLower() : "m";
+            string dateType = Options.TryGetValue("--date-type", out var dt) && dt != "true" ? dt.ToLower() : "m";
 
             // default 1 quindi no multithread
             int threads = 1;
-            options.TryGetValue("--threads", out var thStr);
+            Options.TryGetValue("--threads", out var thStr);
             if (!String.IsNullOrEmpty(thStr) && int.TryParse(thStr, out var thInt) && thInt > 0 && thInt < 64)
             {
                 threads = thInt;
@@ -206,84 +206,49 @@ namespace plugins.eliminator
 
             try
             {
-                // FOREACH PARALLELO
-                if (isParallel && threads > 1)
+                // Avvio il producer di file in background
+                var producerTask = Task.Run(async () =>
                 {
-                    // Avvio il producer di file in background
-                    var producerTask = Task.Run(async () =>
+                    try
                     {
-                        try
-                        {
-                            foreach (var item in itemsToScan)
-                            {
-                                ct.ThrowIfCancellationRequested();
-                                await workChannel.Writer.WriteAsync(item, ct);
-                            }
-                        }
-                        catch (OperationCanceledException) { }
-                        catch (Exception ex) { PrintError($"\n[Errore I/O]: {ex.Message}"); }
-                        finally
-                        {
-                            workChannel.Writer.Complete();
-                        }
-                    }, ct);
-
-                    var parallelOptions = new ParallelOptions
-                    {
-                        MaxDegreeOfParallelism = threads,
-                        CancellationToken = ct
-                    };
-
-                    await Parallel.ForEachAsync(
-                        workChannel.Reader.ReadAllAsync(ct),
-                        parallelOptions,
-                        (item, token) =>
-                        {
-                            try
-                            {
-                                long currentProcessed = Interlocked.Increment(ref processedCount);
-                                // filtro il file
-                                if (!shouldProcess(item)) return ValueTask.CompletedTask;
-                                // calcolo la stringa solo dopo aver filtrato
-                                string finalPath = new(item.PathBuffer, 0, item.PathLength);
-                                long size = ExecuteItemAction(finalPath, item, backupPath, isDebug, logChannel.Writer);
-
-                                if (size >= 0)
-                                {
-                                    Interlocked.Increment(ref actionCount);
-                                    Interlocked.Add(ref bytesSaved, size);
-                                }
-                            }
-                            finally
-                            {
-                                if (item.PathBuffer != null)
-                                {
-                                    ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
-                                }
-                            }
-                            return ValueTask.CompletedTask;
-                        });
-                }
-                // FOREACH SEQUENZIALE
-                else
-                {
-                    foreach (var item in itemsToScan)
-                    {
-                        try
+                        foreach (var item in itemsToScan)
                         {
                             ct.ThrowIfCancellationRequested();
-                            processedCount++;
-                            if (processedCount % 25000 == 0) Console.Write($"\rElementi analizzati: {processedCount}...");
+                            await workChannel.Writer.WriteAsync(item, ct);
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex) { PrintError($"\n[Errore I/O]: {ex.Message}"); }
+                    finally
+                    {
+                        workChannel.Writer.Complete();
+                    }
+                }, ct);
 
-                            if (!shouldProcess(item)) continue;
+                var parallelOptions = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = threads,
+                    CancellationToken = ct
+                };
 
+                await Parallel.ForEachAsync(
+                    workChannel.Reader.ReadAllAsync(ct),
+                    parallelOptions,
+                    (item, token) =>
+                    {
+                        try
+                        {
+                            long currentProcessed = Interlocked.Increment(ref processedCount);
+                            // filtro il file
+                            if (!shouldProcess(item)) return ValueTask.CompletedTask;
+                            // calcolo la stringa solo dopo aver filtrato
                             string finalPath = new(item.PathBuffer, 0, item.PathLength);
                             long size = ExecuteItemAction(finalPath, item, backupPath, isDebug, logChannel.Writer);
 
                             if (size >= 0)
                             {
-                                actionCount++;
-                                bytesSaved += size;
+                                Interlocked.Increment(ref actionCount);
+                                Interlocked.Add(ref bytesSaved, size);
                             }
                         }
                         finally
@@ -293,8 +258,8 @@ namespace plugins.eliminator
                                 ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
                             }
                         }
-                    }
-                }
+                        return ValueTask.CompletedTask;
+                    });
             }
             catch (OperationCanceledException) { Console.WriteLine("\nOperazione interrotta dall'utente."); }
             finally
@@ -317,7 +282,6 @@ namespace plugins.eliminator
             Console.ResetColor();
         }
 
-        // Modifichiamo la firma per accettare il 'fullPath' pre-calcolato
         private long ExecuteItemAction(string fullPath, StackFileInfo item, string? backupPath, bool isDebug, ChannelWriter<string>? logWriter)
         {
             long itemSize = item.IsDirectory ? 0 : item.Length;
@@ -449,7 +413,7 @@ namespace plugins.eliminator
 
         public override void Help()
         {
-            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
+            ConsolePlus.WriteHr();
             ConsolePlus.Write("[Cyan]#[/] Uso: [Yellow]swiss [Magenta]eliminator [DarkGray]<percorso> [opzioni]");
             ConsolePlus.Write("[Cyan]#[/] - percorso : usa . per la cartella corrente oppure definisci un percorso completo");
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
@@ -465,7 +429,7 @@ namespace plugins.eliminator
             ConsolePlus.Write("[Cyan]#[/]  --dirs                : Applica i filtri e le operazioni alle CARTELLE anziché ai file");
             ConsolePlus.Write("[Cyan]#[/]  --parallel, -p        : Esegue l'operazione in multithreading");
             ConsolePlus.Write("[Cyan]#[/]  --threads, -t <num>   : Specifica il numero massimo di thread (default: numero di core della CPU)");
-            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
+            ConsolePlus.WriteHr();
         }
     }
 }

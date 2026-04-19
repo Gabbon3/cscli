@@ -2,8 +2,8 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web;
-using utils;
-using utils.console;
+using lib.io;
+using lib.console;
 
 namespace plugins.mdconverter
 {
@@ -41,6 +41,11 @@ namespace plugins.mdconverter
             // # 1. Parsing e validazione argomenti #
             // # ---------------------------------- #
             string mdPath = args[0];
+            if (string.IsNullOrEmpty(mdPath))
+            {
+                PrintError("Non è stato definito il percorso del file Markdown");
+                return;
+            }
             if (mdPath.StartsWith("./"))
             {
                 mdPath = Path.Combine(Environment.CurrentDirectory, mdPath[2..]);
@@ -50,14 +55,14 @@ namespace plugins.mdconverter
                 PrintError($"il file md \"{mdPath}\" non esiste");
                 return;
             }
-            var options = ParseArguments(args, 1);
+            ParseArguments(args, 1);
             // booleani
-            var convertToPdf = options.ContainsKey("--pdf") || options.ContainsKey("-p");
-            var keepHtml = options.ContainsKey("--keephtml") || options.ContainsKey("-k");
-            var darkMode = options.ContainsKey("--dark") || options.ContainsKey("-d");
+            var convertToPdf = OptionsContains("--pdf", "-p");
+            var keepHtml = OptionsContains("--keephtml", "-k");
+            var darkMode = OptionsContains("--dark", "-d");
             // chiave valore
-            var destPath = options.TryGetValue("--destpath", out var dc) ? dc : options.TryGetValue("-dp", out var ds) ? ds : null;
-            if (!String.IsNullOrEmpty(destPath))
+            var destPath = GetOptionValue("--destpath", "-dp");
+            if (!string.IsNullOrEmpty(destPath))
             {
                 if (destPath.StartsWith("./") && destPath.Length > 1) destPath = Path.Combine(Environment.CurrentDirectory, destPath[2..]);
                 if (!Path.Exists(destPath))
@@ -68,8 +73,8 @@ namespace plugins.mdconverter
             }
             // opzioni mermaid
             // - tema
-            string? mermaidTheme = options.TryGetValue("--mermaid-theme", out var mt) ? mt : null;
-            if (String.IsNullOrEmpty(mermaidTheme))
+            string? mermaidTheme = GetOptionValue("--mermaid-theme");
+            if (string.IsNullOrEmpty(mermaidTheme))
             {
                 mermaidTheme = darkMode ? "dark" : "default";
             }
@@ -561,7 +566,7 @@ namespace plugins.mdconverter
 
         public override void Help()
         {
-            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
+            ConsolePlus.WriteHr();
             ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]mdconverter [DarkGray]<percorso> [opzioni]");
             ConsolePlus.Write("[Cyan]#[/] - percorso: percorso del file .md");
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
@@ -579,7 +584,7 @@ namespace plugins.mdconverter
             ConsolePlus.Write("[Cyan]#[/] - Grafici tramite Mermaid.JS (live editor qui: https://mermaid.ai/live/edit), opzioni:");
             ConsolePlus.Write("[Cyan]#[/]   --mermaid-theme : definisci il tema che preferisci per i grafici");
             ConsolePlus.Write("[Cyan]#[/] - Github notes (tramite costrutti \"> [!WARNING|NOTE...]\")");
-            ConsolePlus.Write("[Cyan]#[DarkGray] -------------------------------- [Cyan]#[/]");
+            ConsolePlus.WriteHr();
         }
     }
 }

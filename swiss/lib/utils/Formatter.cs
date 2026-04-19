@@ -1,4 +1,4 @@
-namespace utils
+namespace lib.utils
 {
     class Formatter
     {

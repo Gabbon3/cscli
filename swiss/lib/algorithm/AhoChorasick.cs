@@ -1,4 +1,4 @@
-namespace utils.text;
+namespace lib.algorithm;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Contratto per handler strutturato (JIT inline, zero virtual dispatch)
