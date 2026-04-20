@@ -1,10 +1,10 @@
-using System.IO.Enumeration;
-using System.Threading.Channels;
-using System.Text;
-using Microsoft.Win32.SafeHandles;
 using lib.console;
-using System.Runtime.CompilerServices;
-using lib.algorithm;
+using lib.io;
+using Microsoft.Win32.SafeHandles;
+using System.IO.Enumeration;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Channels;
 
 namespace plugins.grep
 {
@@ -12,44 +12,20 @@ namespace plugins.grep
     {
         public override string Name => "grep";
         public override string Description => "Plugin che si bagna pensando a ripgrep";
-        // Lunghezza del pattern di ricerca piu lungo per gestire overlap
-        private int LongestPattern = 0;
-        // Lunghezza di tutti i pattern
-        private int[] PatternLengths = [];
-        private bool IgnoreCase = false;
-        // motore di ricerca di grep (usato per ricerca di piu parole insieme)
-        AhoCorasick? AhoEngine;
-        // # ------------------------------- #
-        // # Cartelle da ignorare di default #
-        // # ------------------------------- #
+
+        private Regex? _searchRegex;
+        private FastPrinter _fastPrinter = new();
+
         private static readonly HashSet<string> DefaultExcludeDirs = new(StringComparer.OrdinalIgnoreCase)
         {
             "node_modules", ".git", ".svn", ".hg",
-            "bin", "obj",                           // .NET
-            ".vs", ".idea", ".vscode",              // IDE
-            "__pycache__", ".pytest_cache",         // Python
-            "dist", "build", ".next", ".nuxt",      // frontend build
-            "vendor",                               // Go / PHP
-            ".cargo",                               // Rust
+            "bin", "obj",
+            ".vs", ".idea", ".vscode",
+            "__pycache__", ".pytest_cache",
+            "dist", "build", ".next", ".nuxt",
+            "vendor",
+            ".cargo",
         };
-        private readonly struct AhoMatchHandler(string path, byte[] buffer, int currentDataLength, int chunkStartLine, int[] patternLengths, FastPrinter printer) : IMatchHandler
-        {
-            private readonly byte[] _buffer = buffer;
-            private readonly int _currentDataLength = currentDataLength;
-            private readonly int _chunkStartLine = chunkStartLine;
-            private readonly int[] _patternLengths = patternLengths;
-            private readonly FastPrinter _printer = printer;
-
-            public void OnMatch(int startIndex, int endIndex, int patternIndex, int relativeLine)
-            {
-                int patLen = _patternLengths[patternIndex];
-                ReadOnlySpan<byte> originalDataSpan = _buffer.AsSpan(0, _currentDataLength);
-                int lineNumber = _chunkStartLine + relativeLine;
-                string contextStr = ExtractMatchContext(originalDataSpan, startIndex, patLen, maxContext: 50);
-                _printer.TryPost($"[Green]#[/] [DarkGray]{Path.GetDirectoryName(path)}{Path.DirectorySeparatorChar}[/][Cyan]{Path.GetFileName(path)}[/]\n[Green]# [Yellow]{lineNumber}:[/] {contextStr}\n[DarkGray]*\n*[/]");
-            }
-        }
-        private FastPrinter _fastPrinter = new();
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
@@ -74,24 +50,25 @@ namespace plugins.grep
                 PrintError("Il pattern di ricerca non può essere vuoto.");
                 return;
             }
-            // preparo il pattern per AhoChorasick
-            string[] wordsToSearch = pattern.Split('|', StringSplitOptions.RemoveEmptyEntries);
-            LongestPattern = wordsToSearch[0].Length;
-            // # --------------------- #
-            // # Parsing delle opzioni #
-            // # --------------------- #
-            IgnoreCase = OptionsContains("-i", "--ignore-case");
-            var patternList = new ReadOnlyMemory<byte>[wordsToSearch.Length];
-            PatternLengths = new int[wordsToSearch.Length]; // Inizializza l'array
 
-            for (int i = 0; i < wordsToSearch.Length; i++)
+            // Parsing opzioni
+            bool ignoreCase = OptionsContains("-i", "--ignore-case");
+
+            // Compilo la regex con opzioni ottimizzate per .NET 9
+            var regexOptions = RegexOptions.Compiled | RegexOptions.NonBacktracking;
+            if (ignoreCase) regexOptions |= RegexOptions.IgnoreCase;
+
+            try
             {
-                PatternLengths[i] = wordsToSearch[i].Length; // Salva la lunghezza
-                if (wordsToSearch[i].Length > LongestPattern) LongestPattern = wordsToSearch[i].Length;
-                patternList[i] = Encoding.UTF8.GetBytes(IgnoreCase ? wordsToSearch[i].ToLowerInvariant() : wordsToSearch[i]);
+                _searchRegex = new Regex(pattern, regexOptions);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Pattern regex non valido: {ex.Message}");
+                return;
             }
 
-            // cartelle da escludere
+            // Cartelle da escludere
             var excludeDirs = new HashSet<string>(DefaultExcludeDirs, StringComparer.OrdinalIgnoreCase);
             var excludeDirsOptions = GetOptionValue("--exclude-dir", "-ex");
             if (!string.IsNullOrEmpty(excludeDirsOptions))
@@ -102,7 +79,7 @@ namespace plugins.grep
                 }
             }
 
-            // cartelle da includere rispetto a quelle di default
+            // Cartelle da includere
             var includeDirsOptions = GetOptionValue("-in", "--include-dir");
             if (!string.IsNullOrEmpty(includeDirsOptions))
             {
@@ -112,35 +89,40 @@ namespace plugins.grep
                 }
             }
 
-            // pattern glob per escludere files
-            var includeGlobs = new List<string>();
-            var GlobOptions = GetOptionValue("-g", "--glob");
-            if (!string.IsNullOrEmpty(GlobOptions))
+            // Filtro file usando FileFilterFactory
+            var globPattern = GetOptionValue("-g", "--glob");
+            FileSystemFilter? fileFilter = null;
+
+            if (!string.IsNullOrEmpty(globPattern))
             {
-                foreach (var glob in GlobOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                var filterOpts = new FileFilterFactory.FilterOptions(
+                    Pattern: globPattern,
+                    MatchType: FilterFileNameMatchType.Glob,
+                    IgnoreCase: true
+                );
+
+                try
                 {
-                    includeGlobs.Add(glob.Trim());
+                    fileFilter = FileFilterFactory.CreateFilter(filterOpts);
+                }
+                catch (Exception ex)
+                {
+                    PrintError($"Errore nel filtro glob: {ex.Message}");
+                    return;
                 }
             }
 
-            // inizializzo l'automa di AhoCorasick solo dopo aver validato tutto
-            AhoEngine = new AhoCorasick(patternList);
-
-            // # ---------------------- #
-            // # 1. Preparo il producer #
-            // # ---------------------- #
+            // Channel per i file
             var filesChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000)
             {
                 SingleWriter = true,
                 SingleReader = false
             });
 
-            // avvio il printer ad alte prestazioni sulla console
+            // Avvio FastPrinter
             _fastPrinter.Run(ct);
 
-            // # --------------------- #
-            // # 2. Preparo gli operai #
-            // # --------------------- #
+            // Workers paralleli
             int threads = Environment.ProcessorCount;
             var workers = new Task[threads];
 
@@ -148,19 +130,14 @@ namespace plugins.grep
             {
                 workers[i] = Task.Run(async () =>
                 {
-                    byte[] workerBuffer = new byte[65536];
-                    byte[] lowerBuffer = IgnoreCase ? new byte[65536] : [];
-
                     await foreach (var path in filesChannel.Reader.ReadAllAsync(ct))
                     {
-                        ProcessFile(path, workerBuffer, lowerBuffer, LongestPattern);
+                        ProcessFile(path);
                     }
                 }, ct);
             }
 
-            // # --------------------------------- #
-            // # 3. Producer: FileSystemEnumerable #
-            // # --------------------------------- #
+            // Producer: FileSystemEnumerable
             var enumerationOptions = new EnumerationOptions
             {
                 RecurseSubdirectories = true,
@@ -173,29 +150,15 @@ namespace plugins.grep
                 (ref FileSystemEntry entry) => entry.ToSpecifiedFullPath(),
                 enumerationOptions)
             {
-                // logica di esclusione dei file
                 ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
                     if (entry.IsDirectory) return false;
-                    // se non ci sono filtri passo tutto
-                    if (includeGlobs.Count == 0) return true;
-
-                    ReadOnlySpan<char> fileName = entry.FileName;
-                    // per ogni regola di esclusione la verifico
-                    foreach (var glob in includeGlobs)
-                    {
-                        if (FileSystemName.MatchesSimpleExpression(glob, fileName, ignoreCase: true))
-                        {
-                            return true;
-                        }
-                    }
-                    // qui il file non ha superato nessun match
-                    return false;
+                    if (fileFilter == null) return true;
+                    return fileFilter(ref entry);
                 },
-                // qui filtriamo le cartelle da includere nella ricorsione
                 ShouldRecursePredicate = (ref FileSystemEntry entry) =>
                 {
-                    ReadOnlySpan<char> dirName = entry.FileName; // qui file name => nome cartella
+                    ReadOnlySpan<char> dirName = entry.FileName;
                     foreach (var excluded in excludeDirs)
                     {
                         if (dirName.Equals(excluded, StringComparison.OrdinalIgnoreCase))
@@ -225,74 +188,112 @@ namespace plugins.grep
         }
 
         /// <summary>
-        /// Processa un file andando a cercare il pattern definito all'inizio con AhoCorasick a blocchi di 64KB
+        /// Processa un file cercando il pattern regex a chunk
         /// </summary>
-        /// <param name="path"></param>
-        /// <param name="buffer">Definito in precedenza: byte[] workerBuffer = new byte[65536];</param>
-        /// <param name="lowerBuffer"></param>
-        /// <param name="overlap"></param>
-        private void ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap)
+        private void ProcessFile(string path)
         {
             SafeFileHandle? handle = null;
             try
             {
-                handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
+                handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+                    FileOptions.SequentialScan);
                 long fileLength = RandomAccess.GetLength(handle);
                 if (fileLength == 0) return;
 
+                const int byteBufferSize = 65536; // 64KB byte buffer
+                const int charBufferSize = byteBufferSize; // max char = max byte per UTF-8
+                const int maxOverlap = 1000; // overlap in caratteri
+
+                byte[] byteBuffer = new byte[byteBufferSize];
+                char[] charBuffer = new char[charBufferSize + maxOverlap];
+
                 long fileOffset = 0;
-                int leftover = 0;
-                int totalLines = 1;
+                int charLeftover = 0;
+                int lineNumber = 1;
+                int skipChars = 0;
                 bool isFirstChunk = true;
+                int incompleteBytesCount = 0; // byte UTF-8 incompleti dal chunk precedente
 
                 while (fileOffset < fileLength)
                 {
-                    int bytesToRead = (int)Math.Min(buffer.Length - leftover, fileLength - fileOffset);
-                    int bytesRead = RandomAccess.Read(handle, buffer.AsSpan(leftover, bytesToRead), fileOffset);
+                    int bytesToRead = (int)Math.Min(byteBufferSize - incompleteBytesCount, fileLength - fileOffset);
+                    int bytesRead = RandomAccess.Read(handle, byteBuffer.AsSpan(incompleteBytesCount, bytesToRead), fileOffset);
                     if (bytesRead == 0) break;
 
-                    int currentDataLength = bytesRead + leftover;
-                    ReadOnlySpan<byte> dataSpan = buffer.AsSpan(0, currentDataLength);
+                    int totalBytes = bytesRead + incompleteBytesCount;
+                    ReadOnlySpan<byte> byteSpan = byteBuffer.AsSpan(0, totalBytes);
 
-                    // controllo se si tratta di un file binario
+                    // Controllo file binario (solo primo chunk)
                     if (isFirstChunk)
                     {
-                        if (dataSpan.Contains((byte)0)) return;
+                        if (byteSpan.Contains((byte)0)) return;
                         isFirstChunk = false;
                     }
 
-                    ReadOnlySpan<byte> searchSpan;
-                    if (IgnoreCase)
+                    // Decodifica UTF-8: byte[] -> char[]
+                    // Decodifico dopo il leftover di caratteri dal chunk precedente
+                    int charsDecoded;
+                    int bytesConsumed;
+                    bool completed;
+
+                    Encoding.UTF8.GetDecoder().Convert(
+                        byteSpan,
+                        charBuffer.AsSpan(charLeftover),
+                        flush: fileOffset + bytesRead >= fileLength, // flush solo se è l'ultimo chunk
+                        out bytesConsumed,
+                        out charsDecoded,
+                        out completed);
+
+                    int totalChars = charLeftover + charsDecoded;
+                    ReadOnlySpan<char> searchSpan = charBuffer.AsSpan(0, totalChars);
+
+                    // Converto in string per Regex.EnumerateMatches
+                    string searchText = new string(searchSpan);
+
+                    // Cerco tutti i match
+                    foreach (var match in _searchRegex!.EnumerateMatches(searchText))
                     {
-                        var destSpan = lowerBuffer.AsSpan(0, currentDataLength);
-                        Ascii.ToLower(dataSpan, destSpan, out _);
-                        searchSpan = destSpan;
+                        if (match.Index < skipChars) continue;
+
+                        int matchLineNumber = lineNumber + CountLines(searchText.AsSpan(0, match.Index));
+                        string contextStr = ExtractMatchContext(searchText, match.Index, match.Length);
+
+                        _fastPrinter.TryPost(
+                            $"[Green]#[/] [DarkGray]{Path.GetDirectoryName(path)}{Path.DirectorySeparatorChar}[/]" +
+                            $"[Cyan]{Path.GetFileName(path)}[/]\n" +
+                            $"[Green]# [Yellow]{matchLineNumber}:[/] {contextStr}\n" +
+                            $"[DarkGray]*\n*[/]");
+                    }
+
+                    // Gestione overlap
+                    bool isLastChunk = fileOffset + bytesRead >= fileLength;
+
+                    if (!isLastChunk && totalChars > maxOverlap)
+                    {
+                        // Salvo overlap caratteri
+                        charLeftover = maxOverlap;
+                        searchSpan[(totalChars - maxOverlap)..].CopyTo(charBuffer);
+                        skipChars = charLeftover;
+
+                        // Conta righe consumate
+                        int consumedChars = totalChars - charLeftover;
+                        lineNumber += CountLines(searchSpan[..consumedChars]);
+
+                        // Gestione byte UTF-8 incompleti
+                        // Se non ho consumato tutti i byte, significa che l'ultimo carattere era incompleto
+                        incompleteBytesCount = totalBytes - bytesConsumed;
+                        if (incompleteBytesCount > 0)
+                        {
+                            // Sposto byte incompleti all'inizio del buffer
+                            byteSpan[(totalBytes - incompleteBytesCount)..].CopyTo(byteBuffer);
+                        }
                     }
                     else
                     {
-                        searchSpan = dataSpan;
+                        charLeftover = 0;
+                        skipChars = 0;
+                        incompleteBytesCount = 0;
                     }
-
-                    // creo l'handler passando tutto il necessario
-                    var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter);
-
-                    // inizio la ricerca con AhoCorasick e itero su tutti i byte
-                    AhoEngine!.Search(searchSpan, ref handler);
-
-                    // gestione leftover
-                    if (currentDataLength > overlap)
-                    {
-                        leftover = overlap;
-                        dataSpan[(currentDataLength - overlap)..].CopyTo(buffer);
-                    }
-                    else
-                    {
-                        leftover = currentDataLength;
-                    }
-
-                    // conto il numero di righe presenti in questo blocco di ricerca
-                    int consumedLength = currentDataLength - leftover;
-                    totalLines += CountLines(dataSpan[..consumedLength]);
 
                     fileOffset += bytesRead;
                 }
@@ -306,85 +307,50 @@ namespace plugins.grep
         }
 
         /// <summary>
-        /// Restituisce la stringa gia con i colori del match trovato
+        /// Estrae il contesto attorno al match evidenziando il testo trovato
         /// </summary>
-        /// <param name="span"></param>
-        /// <param name="matchIndex"></param>
-        /// <param name="patternLength"></param>
-        /// <param name="maxContext"></param>
-        /// <returns></returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static string ExtractMatchContext(ReadOnlySpan<byte> span, int matchIndex, int patternLength, int maxContext = 50)
+        private static string ExtractMatchContext(string text, int matchIndex, int matchLength, int maxContext = 50)
         {
             int start = Math.Max(0, matchIndex - maxContext);
-            int endMatch = matchIndex + patternLength;
-            int end = Math.Min(endMatch + maxContext, span.Length);
+            int endMatch = matchIndex + matchLength;
+            int end = Math.Min(endMatch + maxContext, text.Length);
 
-            var leftSpan = span[start..matchIndex];
-            int preNewLine = leftSpan.LastIndexOf((byte)'\n');
+            ReadOnlySpan<char> span = text.AsSpan();
+
+            // Trova inizio/fine riga
+            ReadOnlySpan<char> leftSpan = span[start..matchIndex];
+            int preNewLine = leftSpan.LastIndexOf('\n');
             int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
             bool truncatedLeft = preNewLine == -1 && start > 0;
 
-            var rightSpan = span[endMatch..end];
-            int postNewLine = rightSpan.IndexOf((byte)'\n');
+            ReadOnlySpan<char> rightSpan = span[endMatch..end];
+            int postNewLine = rightSpan.IndexOf('\n');
             int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
             if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
-            bool truncatedRight = postNewLine == -1 && end < span.Length;
+            bool truncatedRight = postNewLine == -1 && end < text.Length;
 
-            var exactLeft = span[actualStart..matchIndex];
-            var exactMatch = span[matchIndex..endMatch];
-            var exactRight = span[endMatch..actualEnd];
+            // Compongo il risultato
+            StringBuilder sb = new StringBuilder(actualEnd - actualStart + 20);
 
-            // +14 per i ... (6) e i tag colore (8)
-            Span<char> buffer = stackalloc char[actualEnd - actualStart + 14];
-            int pos = 0;
+            if (truncatedLeft) sb.Append("...");
+            sb.Append(span[actualStart..matchIndex]);
+            sb.Append("[Red]");
+            sb.Append(span[matchIndex..endMatch]);
+            sb.Append("[/]");
+            sb.Append(span[endMatch..actualEnd]);
+            if (truncatedRight) sb.Append("...");
 
-            // prefisso
-            if (truncatedLeft)
-            {
-                "...".AsSpan().CopyTo(buffer[pos..]);
-                pos += 3;
-            }
-
-            // decodifico sinistra
-            int leftChars = Encoding.UTF8.GetChars(exactLeft, buffer[pos..]);
-            pos += leftChars;
-
-            // tag rosso e match
-            "[Red]".AsSpan().CopyTo(buffer[pos..]);
-            pos += 5;
-
-            int matchChars = Encoding.UTF8.GetChars(exactMatch, buffer[pos..]);
-            pos += matchChars;
-
-            "[/]".AsSpan().CopyTo(buffer[pos..]);
-            pos += 3;
-
-            // decodifico destra
-            int rightChars = Encoding.UTF8.GetChars(exactRight, buffer[pos..]);
-            pos += rightChars;
-
-            // suffisso
-            if (truncatedRight)
-            {
-                "...".AsSpan().CopyTo(buffer[pos..]);
-                pos += 3;
-            }
-
-            return new string(buffer[..pos]);
+            return sb.ToString();
         }
 
         /// <summary>
-        /// Restituisce il numero di riga del match
+        /// Conta il numero di newline in uno span
         /// </summary>
-        /// <param name="span"></param>
-        /// <returns></returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static int CountLines(ReadOnlySpan<byte> span)
+        private static int CountLines(ReadOnlySpan<char> span)
         {
             int count = 0;
             int index;
-            while ((index = span.IndexOf((byte)'\n')) != -1)
+            while ((index = span.IndexOf('\n')) != -1)
             {
                 count++;
                 span = span[(index + 1)..];
@@ -396,12 +362,12 @@ namespace plugins.grep
         {
             ConsolePlus.Write("[Cyan]#[DarkGray] ------------------------------------------------ [Cyan]#[/]");
             ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]grep [DarkGray]<percorso> <pattern> [opzioni]");
-            ConsolePlus.Write("[Cyan]#[/] <pattern>                   : cerca più parole contemporaneamente separandole con [Cyan]|[/]");
+            ConsolePlus.Write("[Cyan]#[/] <pattern>                   : pattern regex (usa [Cyan]|[/] per alternative)");
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
-            ConsolePlus.Write("[Cyan]#[/]   --ignore-case, -i         : Ricerca case insensitive (ASCII)");
+            ConsolePlus.Write("[Cyan]#[/]   --ignore-case, -i         : Ricerca case insensitive");
             ConsolePlus.Write("[Cyan]#[/]   --exclude-dir <dir,...>   : Aggiunge cartelle da escludere");
             ConsolePlus.Write("[Cyan]#[/]   --include-dir <dir,...>   : Riabilita cartelle escluse di default");
-            ConsolePlus.Write("[Cyan]#[/]   --glob <pattern,...>      : Esclude file per pattern (es. *.min.js)");
+            ConsolePlus.Write("[Cyan]#[/]   --glob <pattern>          : Filtra file per pattern glob (es. *.cs)");
             ConsolePlus.Write("[Cyan]#[DarkGray] ------------------------------------------------ [Cyan]#[/]");
         }
     }
