@@ -12,7 +12,7 @@ namespace plugins.grep
     class GrepPlugin : Plugin
     {
         public override string Name => "grep";
-        public override string Description => "Plugin che si bagna pensando a ripgrep";
+        public override string Description => "Ricerca stringhe multiple con AhoCorasick (limitato ASCII - lavora con i byte grezzi";
         // Lunghezza del pattern di ricerca piu lungo per gestire overlap
         private int LongestPattern = 0;
         // Lunghezza di tutti i pattern

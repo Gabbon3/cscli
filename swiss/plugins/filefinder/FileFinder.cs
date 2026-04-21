@@ -56,10 +56,10 @@ namespace plugins.filefinder
             ParseArguments(args, 2);
 
             // --- LETTURA OPZIONI RANKING ---
-            FinderOptionsConfig.Oldest = OptionsContains("-O", "--oldest");
-            FinderOptionsConfig.Newest = OptionsContains("-N", "--newest");
-            FinderOptionsConfig.Biggest = OptionsContains("-B", "--biggest");
-            FinderOptionsConfig.Smallest = OptionsContains("-S", "--smallest");
+            FinderOptionsConfig.Oldest = OptionsContains("--oldest", "-O");
+            FinderOptionsConfig.Newest = OptionsContains("--newest", "-N");
+            FinderOptionsConfig.Biggest = OptionsContains("--biggest", "-B");
+            FinderOptionsConfig.Smallest = OptionsContains("--smallest", "-S");
             bool isRanking = FinderOptionsConfig.Oldest ||
                             FinderOptionsConfig.Newest ||
                             FinderOptionsConfig.Biggest ||
@@ -89,10 +89,10 @@ namespace plugins.filefinder
 
             var filterOpts = new FileFilterFactory.FilterOptions(
                 Pattern: pattern,
-                MatchType: OptionsContains("-f", "--fixed") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
-                IgnoreCase: OptionsContains("-i", "--ignore-case"),
-                ModifiedAfter: GetOptionDatetime("-a", "--after"),
-                ModifiedBefore: GetOptionDatetime("-b", "--before")
+                MatchType: OptionsContains("--fixed", "-f") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
+                IgnoreCase: OptionsContains("--ignore-case", "-i"),
+                ModifiedBefore: GetOptionAge("--since", "-s"),
+                ModifiedAfter: GetOptionAge("--older-than", "-o")
             );
 
             FileSystemFilter? fileFilter;
@@ -189,11 +189,11 @@ namespace plugins.filefinder
             ConsolePlus.Write("[Cyan]#[/] - percorso: usa . per la cartella corrente oppure definisci un percorso completo");
             ConsolePlus.Write("[Cyan]#[/] - pattern: la stringa da usare per la ricerca, regex di default");
             ConsolePlus.Write("[Cyan]#[/] Opzioni Ricerca:");
-            ConsolePlus.Write("[Cyan]#[/] --dirs, -d        : Includi le cartelle nella ricerca");
-            ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i : Rende case insensitive la ricerca");
-            ConsolePlus.Write("[Cyan]#[/] --fixed, -f       : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
-            ConsolePlus.Write("[Cyan]#[/] --after, -a <data>: Trova i file modificati DOPO questa data (YYYY-MM-DD)");
-            ConsolePlus.Write("[Cyan]#[/] --before,-b <data>: Trova i file modificati PRIMA di questa data (YYYY-MM-DD)");
+            ConsolePlus.Write("[Cyan]#[/] --dirs, -d             : Includi le cartelle nella ricerca");
+            ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i      : Rende case insensitive la ricerca");
+            ConsolePlus.Write("[Cyan]#[/] --fixed, -f            : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
+            ConsolePlus.Write("[Cyan]#[/] --since, -s <data>     : trova i file piu recenti di x (d giorni, h ore, m minuti) - es 12d - 12 giorni");
+            ConsolePlus.Write("[Cyan]#[/] --older-than,-o <data>: trova i file piu vecchi di x (d giorni, h ore, m minuti) - es 5h - 5 ore");
             ConsolePlus.Write("[Cyan]#[/] Opzioni Classifica:");
             ConsolePlus.Write("[Cyan]#[/] --biggest, -B         : Restituisce i file più grandi");
             ConsolePlus.Write("[Cyan]#[/] --smallest, -S        : Restituisce i file più piccoli");

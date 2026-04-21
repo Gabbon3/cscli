@@ -78,6 +78,45 @@ namespace plugins
         {
             return int.TryParse(GetOptionValue(flags), out var n) ? n : null;
         }
+        /// <summary>
+        /// Restituisce il parametro Age, fornito in input argomenti come:
+        /// - --flag 12d -> restituisce il datetime Now - 12 giorni
+        /// - -f 10h -> restituisce il datetime Now - 10 ore
+        /// Char validi: d (giorni), h (ore), m (minuti)
+        /// </summary>
+        /// <param name="flags"></param>
+        /// <returns></returns>
+        /// <exception cref="ArgumentException">Lanciato se il char non è valido</exception>
+        protected DateTime? GetOptionAge(params string[] flags)
+        {
+            var input = GetOptionValue(flags);
+            if (input == null) return null;
+            input = input.ToLower().Trim();
+            char lastChar = input[^1];
+            string numericPart;
+            // controllo che l'ultimo char sia una lettera (d, h, m)
+            if (char.IsLetter(lastChar))
+            {
+                numericPart = input[..^1];
+            }
+            else
+            {
+                // se non ce la lettera default sono i giorni
+                numericPart = input;
+                lastChar = 'd';
+            }
+            // converto la parte numerica 
+            // INFO: per il momento nessun Exception
+            if (!int.TryParse(numericPart, out int value)) return null;
+            // calcolo la data
+            return lastChar switch
+            {
+                'd' => DateTime.Now.AddDays(-value),
+                'h' => DateTime.Now.AddHours(-value),
+                'm' => DateTime.Now.AddMinutes(-value),
+                _ => throw new ArgumentException($"{flags[0]} non supporta '{lastChar}', sono valide solo: d, h, m.")
+            };
+        }
 
         /// <summary>
         /// Verifica se una chiave è presente o meno nelle Options

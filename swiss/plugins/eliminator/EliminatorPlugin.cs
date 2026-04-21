@@ -14,6 +14,9 @@ namespace plugins.eliminator
         public override string Name => "eliminator";
         public override string Description => "Tool avanzato per la cancellazione e l'archiviazione massiva dei file";
 
+        private string GlobalTrashPath = "";
+        private string DriveRoot = "C:\\";
+
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
             if (args.Length < 1)
@@ -22,9 +25,7 @@ namespace plugins.eliminator
                 return;
             }
 
-            // ---------------------------------------------------------
-            // 1. PARSING E VALIDAZIONE
-            // ---------------------------------------------------------
+            // PARSING
             string targetPath = args[0];
             if (targetPath == ".")
             {
@@ -41,135 +42,21 @@ namespace plugins.eliminator
             // flag booleani
             bool isDebug = OptionsContains("--debug", "-d");
             bool isRecursive = OptionsContains("--recursive", "-r");
-            bool isRollback = OptionsContains("--rollback", "-rl");
-            bool isForce = OptionsContains("--force", "-f", "-y");
-            bool regexIgnoreCase = OptionsContains("--ignore-case", "-i");
             // bool targetDirs = OptionsContains("--dirs");
-            bool isParallel = OptionsContains("--parallel", "-p");
+            // filtri opzioni
+            var filterOpts = new FileFilterFactory.FilterOptions(
+                Pattern: GetOptionValue("--pattern", "-p"),
+                MatchType: OptionsContains("--fixed", "-f") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
+                IgnoreCase: OptionsContains("--ignore-case", "-i"),
+                ModifiedBefore: GetOptionAge("--since", "-s"),
+                ModifiedAfter: GetOptionAge("--older-than", "-o")
+            );
 
-            // estrazione chiavi-valori
-            string? regexPattern = GetOptionValue("--regex");
-            string? backupPath = GetOptionValue("--backup-path");
+            int threadNumber = Environment.ProcessorCount;
 
-            int? olderThanDays = null;
-            if (Options.TryGetValue("--older-than", out var otStr) && otStr != "true")
-            {
-                if (int.TryParse(otStr, out int days) && days >= 0) olderThanDays = days;
-                else { PrintError("Il valore di --older-than deve essere un numero intero positivo."); return; }
-            }
+            var fileFilter = FileFilterFactory.CreateFilter(filterOpts);
 
-            string dateType = Options.TryGetValue("--date-type", out var dt) && dt != "true" ? dt.ToLower() : "m";
-
-            // default 1 quindi no multithread
-            int threads = 1;
-            Options.TryGetValue("--threads", out var thStr);
-            if (!String.IsNullOrEmpty(thStr) && int.TryParse(thStr, out var thInt) && thInt > 0 && thInt < 64)
-            {
-                threads = thInt;
-                isParallel = true;
-            }
-            else if (isParallel)
-            {
-                // se è attivo il parallelismo ma non è stato definito il numero di threads
-                threads = Environment.ProcessorCount;
-            }
-
-            // ---------------------------------------------------------
-            // 2. LOGICA DI ROLLBACK
-            // ---------------------------------------------------------
-            if (isRollback)
-            {
-                await Rollback(targetPath, isDebug, ct);
-                return;
-            }
-
-            // ---------------------------------------------------------
-            // 3. FILTRI
-            // ---------------------------------------------------------
-            var filters = new List<Func<StackFileInfo, bool>>();
-
-            if (!string.IsNullOrEmpty(regexPattern))
-            {
-                try
-                {
-                    var regexOptions = RegexOptions.Compiled | RegexOptions.NonBacktracking;
-                    if (regexIgnoreCase)
-                    {
-                        regexOptions |= RegexOptions.IgnoreCase;
-                    }
-                    var compiledRegex = new Regex(regexPattern, regexOptions);
-                    filters.Add(info =>
-                    {
-                        // estraggo lo span del nome file direttamente
-                        var nameSpan = info.PathBuffer.AsSpan(info.PathLength - info.NameLength, info.NameLength);
-                        return compiledRegex.IsMatch(nameSpan);
-                    });
-                }
-                catch (ArgumentException ex)
-                {
-                    PrintError($"Pattern Regex non valido: {ex.Message}");
-                    return;
-                }
-            }
-
-            if (olderThanDays.HasValue)
-            {
-                DateTime cutoffDate = DateTime.Now.AddDays(-olderThanDays.Value);
-                filters.Add(dateType switch
-                {
-                    "c" => file => file.CreationTime < cutoffDate,
-                    "a" => file => file.LastAccessTime < cutoffDate,
-                    _ => file => file.LastWriteTime < cutoffDate // default: m
-                });
-            }
-
-            // preparo il filtro per i dati
-            bool shouldProcess(StackFileInfo file) => filters.All(f => f(file));
-
-            // ---------------------------------------------------------
-            // 4. BACKUP
-            // ---------------------------------------------------------
-            if (!isDebug && !isForce)
-            {
-                // Se l'input è redirezionato (es. sessione remota senza TTY), avvisiamo che il prompt fallirà
-                if (Console.IsInputRedirected)
-                {
-                    PrintError("Sessione remota o non interattiva rilevata. Usa il flag --force (o -f, -y) per confermare l'operazione.");
-                    return;
-                }
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"\nATTENZIONE: Stai per operare su {targetPath}");
-                if (filters.Count == 0) Console.WriteLine("PERICOLO: Nessun filtro impostato. Verranno colpiti TUTTI i file.");
-                Console.Write("Vuoi davvero procedere? [s/N]: ");
-                Console.ResetColor();
-
-                string? answer = Console.ReadLine();
-                if (answer?.ToLower() != "s" && answer?.ToLower() != "si")
-                {
-                    Console.WriteLine("Operazione annullata.");
-                    return;
-                }
-            }
-
-            // setup backup (creazione cartella e file CSV)
-            StreamWriter? csvWriter = null;
-            if (!string.IsNullOrEmpty(backupPath))
-            {
-                backupPath = Path.Combine(backupPath, $"EliminatorBackup_{DateTime.Now:yyyyMMdd_HHmmss}");
-                if (!Directory.Exists(backupPath)) Directory.CreateDirectory(backupPath);
-
-                string csvPath = Path.Combine(backupPath, $"eliminator_log.csv");
-                var outStream = new FileStream(csvPath, FileMode.Append, FileAccess.Write, FileShare.Read, bufferSize: 65536, useAsync: true);
-                csvWriter = new StreamWriter(outStream, System.Text.Encoding.UTF8);
-                await csvWriter.WriteLineAsync("OriginalPath;BackupPath;Size;Date");
-            }
-
-            // ---------------------------------------------------------
-            // 5. ESECUZIONE PRINCIPALE
-            // ---------------------------------------------------------
-            Console.WriteLine(isDebug ? "--- AVVIO (DEBUG) ---" : "--- AVVIO ---");
-
-            long processedCount = 0, actionCount = 0, bytesSaved = 0;
+            ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(isDebug ? "(DEBUG)" : "")}");
 
             var enumOptions = new EnumerationOptions
             {
@@ -177,26 +64,22 @@ namespace plugins.eliminator
                 RecurseSubdirectories = isRecursive,
                 BufferSize = 64 * 1024
             };
-
+            // PRODUCER
             IEnumerable<StackFileInfo> itemsToScan = new FileSystemEnumerable<StackFileInfo>(
                 targetPath,
                 (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
                 enumOptions
-            );
-
-            var logChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000) { SingleReader = true });
-            Task? logConsumerTask = null;
-
-            if (csvWriter != null)
+            )
             {
-                logConsumerTask = Task.Run(async () =>
+                ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
-                    await foreach (var line in logChannel.Reader.ReadAllAsync(ct))
+                    if (fileFilter != null)
                     {
-                        await csvWriter.WriteLineAsync(line);
+                        return fileFilter(ref entry);
                     }
-                });
-            }
+                    return false;
+                }
+            };
 
             var workChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(50000)
             {
@@ -204,75 +87,41 @@ namespace plugins.eliminator
                 SingleReader = false
             });
 
-            try
+            var producerTask = Task.Run(async () =>
             {
-                // Avvio il producer di file in background
-                var producerTask = Task.Run(async () =>
+                try
                 {
-                    try
+                    foreach (var item in itemsToScan)
                     {
-                        foreach (var item in itemsToScan)
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            await workChannel.Writer.WriteAsync(item, ct);
-                        }
+                        ct.ThrowIfCancellationRequested();
+                        await workChannel.Writer.WriteAsync(item, ct);
                     }
-                    catch (OperationCanceledException) { }
-                    catch (Exception ex) { PrintError($"\n[Errore I/O]: {ex.Message}"); }
-                    finally
-                    {
-                        workChannel.Writer.Complete();
-                    }
-                }, ct);
-
-                var parallelOptions = new ParallelOptions
-                {
-                    MaxDegreeOfParallelism = threads,
-                    CancellationToken = ct
-                };
-
-                await Parallel.ForEachAsync(
-                    workChannel.Reader.ReadAllAsync(ct),
-                    parallelOptions,
-                    (item, token) =>
-                    {
-                        try
-                        {
-                            long currentProcessed = Interlocked.Increment(ref processedCount);
-                            // filtro il file
-                            if (!shouldProcess(item)) return ValueTask.CompletedTask;
-                            // calcolo la stringa solo dopo aver filtrato
-                            string finalPath = new(item.PathBuffer, 0, item.PathLength);
-                            long size = ExecuteItemAction(finalPath, item, backupPath, isDebug, logChannel.Writer);
-
-                            if (size >= 0)
-                            {
-                                Interlocked.Increment(ref actionCount);
-                                Interlocked.Add(ref bytesSaved, size);
-                            }
-                        }
-                        finally
-                        {
-                            if (item.PathBuffer != null)
-                            {
-                                ArrayPool<char>.Shared.Return(item.PathBuffer, clearArray: false);
-                            }
-                        }
-                        return ValueTask.CompletedTask;
-                    });
-            }
-            catch (OperationCanceledException) { Console.WriteLine("\nOperazione interrotta dall'utente."); }
-            finally
-            {
-                logChannel.Writer.Complete();
-                if (logConsumerTask != null) await logConsumerTask;
-                if (csvWriter != null)
-                {
-                    await csvWriter.FlushAsync();
-                    csvWriter.Dispose();
                 }
-            }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { PrintError($"\n[Errore I/O]: {ex.Message}"); }
+                finally
+                {
+                    workChannel.Writer.Complete();
+                }
+            }, ct);
+            // CONSUMER
+            DriveRoot = Path.GetPathRoot(Path.GetFullPath(targetPath)) ?? "C:\\";
+            GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
+            
 
+            var workers = new Task[threadNumber];
+            var processedCountList = new int[threadNumber];
+            var actionCountList = new int[threadNumber];
+            var bytesSavedList = new int[threadNumber];
+
+            for (int i = 0; i < threadNumber; i++)
+            {
+                workers[i] = Task.Run(async () =>
+                {
+
+                });
+            }
+            
             // REPORT FINALE
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"\n\nOperazione Conclusa.");
@@ -280,135 +129,6 @@ namespace plugins.eliminator
             Console.WriteLine($"- File colpiti    : {actionCount}");
             Console.WriteLine($"- Spazio coinvolto: {Formatter.Bytes(bytesSaved)}");
             Console.ResetColor();
-        }
-
-        private long ExecuteItemAction(string fullPath, StackFileInfo item, string? backupPath, bool isDebug, ChannelWriter<string>? logWriter)
-        {
-            long itemSize = item.IsDirectory ? 0 : item.Length;
-
-            if (isDebug)
-            {
-                Console.WriteLine($"[DEBUG] {(item.IsDirectory ? "DIR " : "FILE")}: {fullPath}");
-                return itemSize;
-            }
-
-            try
-            {
-                if (!string.IsNullOrEmpty(backupPath))
-                {
-                    // BACKUP
-                    ReadOnlySpan<char> nameSpan = item.PathBuffer.AsSpan(item.PathLength - item.NameLength, item.NameLength);
-                    string name = new(nameSpan);
-
-                    string destItem = Path.Combine(backupPath, name);
-                    if (item.IsDirectory ? Directory.Exists(destItem) : File.Exists(destItem))
-                    {
-                        string ext = Path.GetExtension(name);
-                        string nameOnly = Path.GetFileNameWithoutExtension(name);
-                        destItem = Path.Combine(backupPath, $"{nameOnly}_{Guid.NewGuid().ToString("N")[..8]}{ext}");
-                    }
-
-                    if (item.IsDirectory) Directory.Move(fullPath, destItem);
-                    else File.Move(fullPath, destItem);
-
-                    logWriter?.TryWrite($"{fullPath};{destItem};{itemSize};{DateTime.Now:O}");
-                }
-                else
-                {
-                    // ELIMINAZIONE
-                    if (item.IsDirectory) Directory.Delete(fullPath, recursive: true);
-                    else
-                    {
-                        bool success = NativeIO.DeleteFile(fullPath);
-                        if (!success) PrintWarning($"Impossibile cancellare {fullPath}");
-                    }
-                }
-
-                return itemSize;
-            }
-            catch (Exception ex)
-            {
-                ReadOnlySpan<char> nameSpan = item.PathBuffer.AsSpan(item.PathLength - item.NameLength, item.NameLength);
-                PrintError($"eccezione su {new string(nameSpan)}: {ex.Message}");
-                return -1; // -1 indica errore
-            }
-        }
-
-        private async Task<bool> Rollback(string targetPath, bool isDebug, CancellationToken ct)
-        {
-            string csvPath = Path.Combine(targetPath, "eliminator_log.csv");
-
-            if (!File.Exists(csvPath))
-            {
-                PrintError($"File di log non trovato per il rollback in: {targetPath}");
-                return false;
-            }
-
-            Console.WriteLine(isDebug ? "--- AVVIO ROLLBACK (DEBUG) ---" : "--- AVVIO ROLLBACK ---");
-
-            long restoredCount = 0, failedCount = 0;
-
-            await using var inStream = new FileStream(csvPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 65536, useAsync: true);
-            using var reader = new StreamReader(inStream, System.Text.Encoding.UTF8);
-
-            string? currentLine = await reader.ReadLineAsync();
-
-            while ((currentLine = await reader.ReadLineAsync()) != null)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                string[] parts = currentLine.Split(';');
-                if (parts.Length < 2) continue;
-
-                string originalPath = parts[0];
-                string currentBackupPath = parts[1];
-
-                if (string.IsNullOrWhiteSpace(originalPath) || string.IsNullOrWhiteSpace(currentBackupPath)) continue;
-
-                if (isDebug)
-                {
-                    Console.WriteLine($"[DEBUG] Ripristino: {Path.GetFileName(currentBackupPath)} -> {originalPath}");
-                    restoredCount++;
-                    continue;
-                }
-
-                try
-                {
-                    if (File.Exists(currentBackupPath))
-                    {
-                        string? destDir = Path.GetDirectoryName(originalPath);
-                        if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
-                        {
-                            Directory.CreateDirectory(destDir);
-                        }
-
-                        File.Move(currentBackupPath, originalPath, overwrite: true);
-                        restoredCount++;
-                    }
-                    else
-                    {
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.WriteLine($"\r[AVVISO] File non trovato nel backup: {currentBackupPath}");
-                        Console.ResetColor();
-                        failedCount++;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"\r[ERRORE] Impossibile ripristinare {Path.GetFileName(currentBackupPath)}: {ex.Message}");
-                    Console.ResetColor();
-                    failedCount++;
-                }
-            }
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"\nOperazione di Rollback Conclusa.");
-            Console.WriteLine($"- File ripristinati : {restoredCount}");
-            if (failedCount > 0) Console.WriteLine($"- File ignorati/err : {failedCount}");
-            Console.ResetColor();
-
-            return true;
         }
 
         public override void Help()

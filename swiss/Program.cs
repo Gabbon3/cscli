@@ -35,7 +35,7 @@ List<PluginRegistration> plugins = [
     new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
     new("cripto", "Effettua la crittografia su file o cartelle legata all'utente Windows", () => new CriptoPlugin()),
-    new("grep", "Plugin che si bagna pensando a ripgrep", () => new GrepPlugin()),
+    new("grep", "Ricerca stringhe multiple con AhoCorasick (limitato ASCII - lavora con i byte grezzi)", () => new GrepPlugin()),
 ];
 // # ----------------------- #
 
@@ -146,16 +146,16 @@ else
 // # -------------------- #
 static void Help(List<PluginRegistration> plugins)
 {
-    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
-    ConsolePlus.Write("# Lista comandi supportati:");
+    ConsolePlus.WriteHr();
+    ConsolePlus.Write("[Cyan]#[/] Lista comandi supportati:");
     // per formattazione
     int maxNameLength = plugins.Count != 0 ? plugins.Max(p => p.Name.Length) : 0;
     foreach (var plugin in plugins)
     {
-        ConsolePlus.Write($"* [Cyan]{plugin.Name.PadRight(maxNameLength)}[/] -> [Yellow]{plugin.Description}[/]");
+        ConsolePlus.Write($"[Cyan]* [Green]{plugin.Name.PadRight(maxNameLength)}[/] -> [Yellow]{plugin.Description}[/]");
     }
-    ConsolePlus.Write($"* [Magenta]{"--stats".PadRight(maxNameLength)}[/] -> [DarkGray]Stampa le statistiche di esecuzione[/]");
-    ConsolePlus.Write("# [DarkGray]-----------------------[/] #");
+    ConsolePlus.Write($"[Cyan]* [Green]{"--stats".PadRight(maxNameLength)}[/] -> [DarkGray]Inseriscilo come ultimo argomento per stampare le statistiche di esecuzione[/]");
+    ConsolePlus.WriteHr();
 }
 
 static void VersionInfo()

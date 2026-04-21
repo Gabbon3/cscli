@@ -32,11 +32,11 @@ namespace plugins.count
 
             // creazione dei filtro per il conteggio
             var filterOpts = new FileFilterFactory.FilterOptions(
-                Pattern: GetOptionValue("-p", "--pattern"),
-                MatchType: OptionsContains("-f", "--fixed") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
-                IgnoreCase: OptionsContains("-i", "--ignore-case"),
-                ModifiedAfter: GetOptionDatetime("-a", "--after"),
-                ModifiedBefore: GetOptionDatetime("-b", "--before")
+                Pattern: GetOptionValue("--pattern", "-p"),
+                MatchType: OptionsContains("--fixed", "-f") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
+                IgnoreCase: OptionsContains("--ignore-case", "-i"),
+                ModifiedBefore: GetOptionAge("--since", "-s"),
+                ModifiedAfter: GetOptionAge("--older-than", "-o")
             );
 
             FileSystemFilter? fileFilter = null;
@@ -100,13 +100,13 @@ namespace plugins.count
             ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]count [DarkGray]<percorso> [opzioni]");
             ConsolePlus.Write("[Cyan]#[/] - percorso: usa . per la cartella corrente oppure definisci un percorso completo");
             ConsolePlus.Write("[Cyan]#[/] Opzioni Ricerca:");
-            ConsolePlus.Write("[Cyan]#[/] --directory, -d   : Includi le cartelle nel conteggio");
-            ConsolePlus.Write("[Cyan]#[/] --recursive, -r   : Includi nel conteggio tutte le sotto cartelle");
-            ConsolePlus.Write("[Cyan]#[/] --pattern, -p     : Pattern per filtrare i file da contare");
-            ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i : Rende case insensitive la ricerca");
-            ConsolePlus.Write("[Cyan]#[/] --fixed, -f       : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
-            ConsolePlus.Write("[Cyan]#[/] --after, -a <data>: Trova i file modificati DOPO questa data (YYYY-MM-DD)");
-            ConsolePlus.Write("[Cyan]#[/] --before,-b <data>: Trova i file modificati PRIMA di questa data (YYYY-MM-DD)");
+            ConsolePlus.Write("[Cyan]#[/] --directory, -d        : Includi le cartelle nel conteggio");
+            ConsolePlus.Write("[Cyan]#[/] --recursive, -r        : Includi nel conteggio tutte le sotto cartelle");
+            ConsolePlus.Write("[Cyan]#[/] --pattern, -p          : Pattern per filtrare i file da contare");
+            ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i      : Rende case insensitive la ricerca");
+            ConsolePlus.Write("[Cyan]#[/] --fixed, -f            : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
+            ConsolePlus.Write("[Cyan]#[/] --since, -s <data>     : trova i file piu recenti di x (d giorni, h ore, m minuti) - es 12d - 12 giorni");
+            ConsolePlus.Write("[Cyan]#[/] --older-than,-o <data>: trova i file piu vecchi di x (d giorni, h ore, m minuti) - es 5h - 5 ore");
             ConsolePlus.Write("[Cyan]#[/] Esempi:");
             ConsolePlus.Write("[Cyan]#[/] - swiss count .");
             ConsolePlus.Write("[Cyan]#[/] - swiss count . -d -p \"*.txt\" -f");
