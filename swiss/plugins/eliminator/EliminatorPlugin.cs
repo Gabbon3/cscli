@@ -1,6 +1,4 @@
-﻿using System.Buffers;
-using System.IO.Enumeration;
-using System.Text.RegularExpressions;
+﻿using System.IO.Enumeration;
 using System.Threading.Channels;
 using lib.io;
 using lib.utils;
@@ -73,11 +71,12 @@ namespace plugins.eliminator
             {
                 ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
+                    if (entry.IsDirectory) return false;
                     if (fileFilter != null)
                     {
                         return fileFilter(ref entry);
                     }
-                    return false;
+                    return true;
                 }
             };
 
@@ -107,27 +106,136 @@ namespace plugins.eliminator
             // CONSUMER
             DriveRoot = Path.GetPathRoot(Path.GetFullPath(targetPath)) ?? "C:\\";
             GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
-            
 
             var workers = new Task[threadNumber];
-            var processedCountList = new int[threadNumber];
-            var actionCountList = new int[threadNumber];
-            var bytesSavedList = new int[threadNumber];
+            // sono tutti inizializzati gia a 0
+            var droppedFilesCountList = new int[threadNumber];
+            var bytesSavedList = new long[threadNumber];
 
             for (int i = 0; i < threadNumber; i++)
             {
+                int workerId = i;
                 workers[i] = Task.Run(async () =>
                 {
+                    List<Task> backgroundWorkerDrops = [];
+                    int batchId = 0;
+                    // cartella di lavoro del worker
+                    string workerRoot = Path.Combine(GlobalTrashPath, workerId.ToString());
+                    Directory.CreateDirectory(workerRoot);
+                    // cartella di batch corrente
+                    string currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
+                    Directory.CreateDirectory(currentBatchPath);
+                    // counter files cancellati da questo worker
+                    int filesDroppedCounter = 0;
 
+                    try
+                    {
+                        await foreach (var item in workChannel.Reader.ReadAllAsync())
+                        {
+                            try
+                            {
+                                filesDroppedCounter++;
+                                droppedFilesCountList[workerId] = filesDroppedCounter;
+                                string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{filesDroppedCounter}.tmp";
+                                if (item.IsDirectory)
+                                {
+                                    Directory.Move(item.GetFullPath(), destPath);
+                                }
+                                else
+                                {
+                                    bytesSavedList[workerId] += item.Length;
+                                    File.Move(item.GetFullPath(), destPath);
+                                }
+                                // ogni 4096 elementi cancello la cartella == a n % 4096 == 0
+                                if ((filesDroppedCounter & 4095) == 0)
+                                {
+                                    string folderToDrop = currentBatchPath;
+                                    backgroundWorkerDrops.Add(Task.Run(() =>
+                                    {
+                                        try { if (!isDebug) Directory.Delete(folderToDrop, true); } catch { }
+                                    }));
+                                    batchId++;
+                                    currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
+                                    Directory.CreateDirectory(currentBatchPath);
+                                    ct.ThrowIfCancellationRequested();
+                                }
+                            }
+                            finally
+                            {
+                                // restituisco ArrayPool
+                                item.Dispose();
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        // attendo tutte le cancellazioni e poi elimino tutto
+                        await Task.WhenAll(backgroundWorkerDrops);
+                        if (Directory.Exists(workerRoot))
+                        {
+                            try { if (!isDebug) Directory.Delete(workerRoot, true); } catch { }
+                        }
+                    }
                 });
             }
-            
-            // REPORT FINALE
+
+            // UI monitor
+            bool isProcessing = true;
+            var monitorTask = Task.Run(async () =>
+            {
+                // preparazione righe vuote
+                for (int i = 0; i < threadNumber; i++) Console.WriteLine();
+                int consoleWidth = 80; // Default di sicurezza
+                try { consoleWidth = Console.WindowWidth; } catch { } // Ignora eccezioni se in esecuzione remota/re-diretta
+                try
+                {
+                    while (isProcessing && !ct.IsCancellationRequested)
+                    {
+                        // Spostiamo il cursore in su di 'n' righe per sovrascrivere esattamente il nostro blocco
+                        try { Console.SetCursorPosition(0, Console.CursorTop - threadNumber); } catch { }
+
+                        for (int i = 0; i < threadNumber; i++)
+                        {
+                            int totalDropped = droppedFilesCountList[i];
+                            int currentBatch = totalDropped / 4096;
+                            int currentProgress = totalDropped % 4096;
+                            // Calcoliamo la lunghezza della barra (max 40 caratteri, 1 trattino ogni ~100 file)
+                            int dashesCount = currentProgress / 102;
+                            string bar = new string('-', dashesCount).PadRight(40, ' ');
+                            // Formattiamo la stringa: Thread 01 [Batch 005] 0020480 |-------    |
+                            string line = $"T-{i:D2} [B-{currentBatch:D3}] {totalDropped:D7} |{bar}|";
+                            // PadRight pulisce i "rimasugli" di testo se la riga precedente era più lunga
+                            Console.WriteLine(line.PadRight(consoleWidth - 1));
+                        }
+                        await Task.Delay(150, ct);
+                    }
+                }
+                catch (TaskCanceledException) { /* Uscita pulita */ }
+            });
+            // UI end
+
+            await Task.WhenAll(workers);
+            isProcessing = false; // Segnala alla UI di fermarsi
+            await monitorTask;
+            await producerTask;
+
+            if (Directory.Exists(GlobalTrashPath))
+            {
+                try { if (!isDebug) Directory.Delete(GlobalTrashPath, true); } catch { }
+            }
+            // ---
+            long totalDropped = 0;
+            long totalBytesSaved = 0;
+            for (int i = 0; i < threadNumber; i++)
+            {
+                totalDropped += droppedFilesCountList[i];
+                totalBytesSaved += bytesSavedList[i];
+            }
+            // ---
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"\n\nOperazione Conclusa.");
-            Console.WriteLine($"- File analizzati : {processedCount}");
-            Console.WriteLine($"- File colpiti    : {actionCount}");
-            Console.WriteLine($"- Spazio coinvolto: {Formatter.Bytes(bytesSaved)}");
+            Console.WriteLine($"- File cancellati  : {totalDropped}");
+            Console.WriteLine($"- Spazio coinvolto : {Formatter.Bytes(totalBytesSaved)}");
             Console.ResetColor();
         }
 

@@ -60,7 +60,7 @@ namespace lib.io.stack
             return new string(PathBuffer, start, NameLength);
         }
 
-        public string GetFullPath()
+        public readonly string GetFullPath()
         {
             return new string(PathBuffer, 0, PathLength);
         }
