@@ -24,23 +24,15 @@ namespace plugins.eliminator
             }
 
             // PARSING
-            string targetPath = args[0];
-            if (targetPath == ".")
-            {
-                targetPath = Directory.GetCurrentDirectory();
-            }
-            else if (!Directory.Exists(targetPath))
-            {
-                Console.WriteLine($"Errore: il percorso \"{targetPath}\" non esiste");
-                return;
-            }
+            string? targetPath = ParsePath(args[0]);
+            if (string.IsNullOrEmpty(targetPath)) return;
 
             ParseArguments(args, 1);
 
             // flag booleani
             bool isDebug = OptionsContains("--debug", "-d");
             bool isRecursive = OptionsContains("--recursive", "-r");
-            // bool targetDirs = OptionsContains("--dirs");
+            int threadNumber = GetOptionInt("--threads", "-t") ?? Environment.ProcessorCount;
             // filtri opzioni
             var filterOpts = new FileFilterFactory.FilterOptions(
                 Pattern: GetOptionValue("--pattern", "-p"),
@@ -49,8 +41,6 @@ namespace plugins.eliminator
                 ModifiedBefore: GetOptionAge("--since", "-s"),
                 ModifiedAfter: GetOptionAge("--older-than", "-o")
             );
-
-            int threadNumber = Environment.ProcessorCount;
 
             var fileFilter = FileFilterFactory.CreateFilter(filterOpts);
 
@@ -62,7 +52,11 @@ namespace plugins.eliminator
                 RecurseSubdirectories = isRecursive,
                 BufferSize = 64 * 1024
             };
-            // PRODUCER
+
+            // # -------------- #
+            // #    PRODUCER    #
+            // # -------------- #
+
             IEnumerable<StackFileInfo> itemsToScan = new FileSystemEnumerable<StackFileInfo>(
                 targetPath,
                 (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
@@ -93,7 +87,15 @@ namespace plugins.eliminator
                     foreach (var item in itemsToScan)
                     {
                         ct.ThrowIfCancellationRequested();
-                        await workChannel.Writer.WriteAsync(item, ct);
+                        if (isDebug)
+                        {
+                            ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
+                            item.Dispose();
+                        }
+                        else
+                        {
+                            await workChannel.Writer.WriteAsync(item, ct);
+                        }
                     }
                 }
                 catch (OperationCanceledException) { }
@@ -103,6 +105,11 @@ namespace plugins.eliminator
                     workChannel.Writer.Complete();
                 }
             }, ct);
+
+            // # -------------- #
+            // #    CONSUMER    #
+            // # -------------- #
+
             // CONSUMER
             DriveRoot = Path.GetPathRoot(Path.GetFullPath(targetPath)) ?? "C:\\";
             GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
@@ -152,7 +159,7 @@ namespace plugins.eliminator
                                     string folderToDrop = currentBatchPath;
                                     backgroundWorkerDrops.Add(Task.Run(() =>
                                     {
-                                        try { if (!isDebug) Directory.Delete(folderToDrop, true); } catch { }
+                                        try { Directory.Delete(folderToDrop, true); } catch { }
                                     }));
                                     batchId++;
                                     currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
@@ -173,7 +180,7 @@ namespace plugins.eliminator
                         await Task.WhenAll(backgroundWorkerDrops);
                         if (Directory.Exists(workerRoot))
                         {
-                            try { if (!isDebug) Directory.Delete(workerRoot, true); } catch { }
+                            try { Directory.Delete(workerRoot, true); } catch { }
                         }
                     }
                 });
@@ -183,6 +190,11 @@ namespace plugins.eliminator
             bool isProcessing = true;
             var monitorTask = Task.Run(async () =>
             {
+                // se il debug è attivo allora non attivo la ui
+                if (isDebug)
+                {
+                    return;
+                }
                 // preparazione righe vuote
                 for (int i = 0; i < threadNumber; i++) Console.WriteLine();
                 int consoleWidth = 80; // Default di sicurezza
@@ -221,7 +233,7 @@ namespace plugins.eliminator
 
             if (Directory.Exists(GlobalTrashPath))
             {
-                try { if (!isDebug) Directory.Delete(GlobalTrashPath, true); } catch { }
+                try { Directory.Delete(GlobalTrashPath, true); } catch { }
             }
             // ---
             long totalDropped = 0;

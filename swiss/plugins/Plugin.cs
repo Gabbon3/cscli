@@ -44,6 +44,31 @@ namespace plugins
         }
 
         /// <summary>
+        /// Fa il parsing dell'input path preso dalla CLI e controlla se esiste su richiesta
+        /// </summary>
+        /// <param name="inputPath">percorso preso dagli args</param>
+        /// <param name="checkPath">se true controlla se il path esuste</param>
+        /// <returns></returns>
+        protected string? ParsePath(string inputPath, bool checkPath = false)
+        {
+            string path = inputPath;
+            if (inputPath == ".")
+            {
+                path = Environment.CurrentDirectory;
+            }
+            else if (inputPath.StartsWith("./") || inputPath.StartsWith($".{Path.DirectorySeparatorChar}"))
+            {
+                path = Path.Combine(Environment.CurrentDirectory, inputPath[2..]);
+            }
+            if (checkPath && !Path.Exists(path))
+            {
+                PrintError($"Il percorso non esiste: {path}");
+                return null;
+            }
+            return path;
+        }
+
+        /// <summary>
         /// Restituisce il valore di un opzione
         /// Devi prima aver richiamato ParseArgument 
         /// </summary>
