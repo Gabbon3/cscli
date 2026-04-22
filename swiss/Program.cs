@@ -90,7 +90,7 @@ if (pluginMeta != null)
 
     if (pluginArgs.Length > 0 && (pluginArgs[0] == "--help" || pluginArgs[0] == "-h"))
     {
-        plugin.Help();
+        plugin.PrintHelp();
         return;
     }
     // # STATS

@@ -15,7 +15,7 @@
 		<Nullable>enable</Nullable>
 
 		<PublishAot>true</PublishAot>
-		<PublishDir>C:\tesisquare\tools</PublishDir>
+		<PublishDir>c:\users\g2004\desktop\tools</PublishDir>
 
 		<StripSymbols>true</StripSymbols>
 		<ConsoleFullSymbolStackTraces>false</ConsoleFullSymbolStackTraces>

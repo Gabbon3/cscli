@@ -1,185 +1,216 @@
-namespace plugins
+using System.Reflection;
+using lib.console;
+
+namespace plugins;
+
+public abstract class Plugin
 {
-    public abstract class Plugin : IPlugin
+    public abstract string Name { get; }
+    public abstract string Description { get; }
+    public abstract Task RunAsync(string[] args, CancellationToken ct);
+    /// <summary>
+    /// Parsa automaticamente gli args e restituisce l'oggetto Settings popolato
+    /// </summary>
+    protected static TSettings ParseSettings<TSettings>(string[] args) where TSettings : new()
     {
-        public abstract string Name { get; }
-        public abstract string Description { get; }
-        protected int ArgsStartIndex = 0;
-        protected Dictionary<string, string> Options { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
-        protected readonly object _printErrorLock = new();
+        var settings = new TSettings();
+        var props = typeof(TSettings).GetProperties();
 
-        public abstract Task RunAsync(string[] args, CancellationToken ct);
+        // 1. Estrae i Fixed e le Opzioni
+        var fixedProps = props
+            .Select(p => new { Prop = p, Attr = p.GetCustomAttribute<FixedAttribute>() })
+            .Where(x => x.Attr != null)
+            .OrderBy(x => x.Attr!.Position)
+            .ToList();
 
-        /// <summary>
-        /// Carica i valori degli argomenti di tipo "opzioni" in Plugin.Options
-        /// </summary>
-        /// <param name="args"></param>
-        /// <param name="startIndex"></param>
-        protected void ParseArguments(string[] args, int startIndex = 1)
+        var optionProps = props
+            .Select(p => new { Prop = p, Attr = p.GetCustomAttribute<OptionAttribute>() })
+            .Where(x => x.Attr != null)
+            .ToList();
+
+        int argIndex = 0;
+
+        // 2. Parsa prima gli argomenti Fixed (Posizionali)
+        foreach (var fp in fixedProps)
         {
-            Options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // Se finiscono gli argomenti, o se incontriamo improvvisamente un flag (es: -r), ci fermiamo
+            if (argIndex >= args.Length || args[argIndex].StartsWith('-'))
+                break;
 
-            for (int i = startIndex; i < args.Length; i++)
+            AssignValue(settings, fp.Prop, args[argIndex]);
+            argIndex++;
+        }
+
+        // 3. Parsa il resto come Opzioni (Flag e Valori)
+        while (argIndex < args.Length)
+        {
+            string currentArg = args[argIndex];
+
+            if (currentArg.StartsWith('-'))
             {
-                string current = args[i];
+                bool isLong = currentArg.StartsWith("--");
+                string optName = isLong ? currentArg.Substring(2) : currentArg.Substring(1);
 
-                if (current.StartsWith('-'))
+                // Cerca la proprietà corrispondente all'attributo
+                var match = optionProps.FirstOrDefault(o =>
+                    (isLong && o.Attr!.LongName == optName) ||
+                    (!isLong && o.Attr!.ShortName?.ToString() == optName)
+                );
+
+                if (match != null)
                 {
-                    string key = current.ToLower();
-                    if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                    if (match.Prop.PropertyType == typeof(bool))
                     {
-                        Options[key] = args[i + 1];
-                        i++;
+                        // Se è booleano, la sua semplice presenza significa TRUE (es: --recursive)
+                        match.Prop.SetValue(settings, true);
                     }
                     else
                     {
-                        Options[key] = "true";
+                        // Se è un valore (es: --threads 4), prendiamo l'argomento successivo
+                        if (argIndex + 1 < args.Length && !args[argIndex + 1].StartsWith('-'))
+                        {
+                            argIndex++;
+                            AssignValue(settings, match.Prop, args[argIndex]);
+                        }
                     }
                 }
-                else
-                {
-                    PrintError($"Argomento posizionale non previsto o malformattato: {current}");
-                }
             }
+            argIndex++;
         }
 
-        /// <summary>
-        /// Fa il parsing dell'input path preso dalla CLI e controlla se esiste su richiesta
-        /// </summary>
-        /// <param name="inputPath">percorso preso dagli args</param>
-        /// <param name="checkPath">se true controlla se il path esuste</param>
-        /// <returns></returns>
-        protected string? ParsePath(string inputPath, bool checkPath = false)
-        {
-            string path = inputPath;
-            if (inputPath == ".")
-            {
-                path = Environment.CurrentDirectory;
-            }
-            else if (inputPath.StartsWith("./") || inputPath.StartsWith($".{Path.DirectorySeparatorChar}"))
-            {
-                path = Path.Combine(Environment.CurrentDirectory, inputPath[2..]);
-            }
-            if (checkPath && !Path.Exists(path))
-            {
-                PrintError($"Il percorso non esiste: {path}");
-                return null;
-            }
-            return path;
-        }
+        return settings;
+    }
 
-        /// <summary>
-        /// Restituisce il valore di un opzione
-        /// Devi prima aver richiamato ParseArgument 
-        /// </summary>
-        /// <param name="flags"></param>
-        /// <returns></returns>
-        protected string? GetOptionValue(params string[] flags)
+    /// <summary>
+    /// Fa il parsing dell'input path preso dalla CLI e controlla se esiste su richiesta
+    /// </summary>
+    /// <param name="inputPath">percorso preso dagli args</param>
+    /// <param name="checkPath">se true controlla se il path esuste</param>
+    /// <returns></returns>
+    protected string? ParsePath(string inputPath, bool checkPath = false)
+    {
+        string path = inputPath;
+        if (inputPath == ".")
         {
-            foreach (var flag in flags)
-            {
-                if (Options.TryGetValue(flag, out var value))
-                {
-                    return value;
-                }
-            }
+            path = Environment.CurrentDirectory;
+        }
+        else if (inputPath.StartsWith("./") || inputPath.StartsWith($".{Path.DirectorySeparatorChar}"))
+        {
+            path = Path.Combine(Environment.CurrentDirectory, inputPath[2..]);
+        }
+        if (checkPath && !Path.Exists(path))
+        {
+            PrintError($"Il percorso non esiste: {path}");
             return null;
         }
-        /// <summary>
-        /// Restituisce il valore di un opzione come Datetime
-        /// </summary>
-        /// <param name="flags"></param>
-        /// <returns></returns>
-        protected DateTime? GetOptionDatetime(params string[] flags)
+        return path;
+    }
+
+    /// <summary>
+    /// Helper per convertire le stringhe nei tipi giusti (int, string, bool, ecc.)
+    /// </summary>
+    /// <param name="obj">Opzione delle settings da valorizzare</param>
+    /// <param name="prop"></param>
+    /// <param name="value">La stringa ottenuta dagli args</param>
+    private static void AssignValue(object obj, PropertyInfo prop, string value)
+    {
+        // Ottengo il tipo di elemento (string, int, bool) della proprietà
+        var targetType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+        // in base al tipo confronto e faccio il parsing
+        // stringhe
+        if (targetType == typeof(string))
+            prop.SetValue(obj, value);
+        // int
+        else if (targetType == typeof(int) && int.TryParse(value, out int intVal))
+            prop.SetValue(obj, intVal);
+        // bool
+        else if (targetType == typeof(bool) && bool.TryParse(value, out bool boolVal))
+            prop.SetValue(obj, boolVal);
+        // datetime
+        else if (targetType == typeof(DateTime) && DateTime.TryParse(value, out DateTime datetimeVal))
+            prop.SetValue(obj, datetimeVal);
+        // double
+        else if (targetType == typeof(double) && double.TryParse(value, out double doubleVal))
+            prop.SetValue(obj, doubleVal);
+        // TODO: aggiungere supporto per altri tipi
+    }
+
+    /// <summary>
+    /// Stampa dell'Help standardizzata basata sulla struttura dei settings
+    /// </summary>
+    /// <typeparam name="TSettings"></typeparam>
+    public void PrintHelp<TSettings>()
+    {
+        var properties = typeof(TSettings).GetProperties();
+
+        // 1. Estrai e ordina gli argomenti Fixed
+        var fixedArgs = properties
+            .Select(p => new { Prop = p, Attr = p.GetCustomAttribute<FixedAttribute>() })
+            .Where(x => x.Attr != null)
+            .OrderBy(x => x.Attr!.Position)
+            .ToList();
+
+        // 2. Estrai le Opzioni
+        var options = properties
+            .Select(p => new { Prop = p, Attr = p.GetCustomAttribute<OptionAttribute>() })
+            .Where(x => x.Attr != null)
+            .ToList();
+
+        // --- COMPOSIZIONE OUTPUT ---
+
+        // Usage string: [Yellow]swiss [Blue]{Name} <fixed1> <fixed2> [opzioni]
+        string usageLine = $"[Cyan]#[/] [Yellow]swiss[/] [Blue]{Name}[/]";
+        foreach (var fa in fixedArgs)
         {
-            return DateTime.TryParse(GetOptionValue(flags), out var dt) ? dt : null;
+            usageLine += $" [DarkGray]<{fa.Attr!.Name}>[/]";
         }
-        /// <summary>
-        /// Restituisce il valore di un opzione come int
-        /// </summary>
-        /// <param name="flags"></param>
-        /// <returns></returns>
-        protected int? GetOptionInt(params string[] flags)
+        if (options.Any()) usageLine += " [DarkGray][opzioni][/]";
+
+        ConsolePlus.WriteHr();
+        ConsolePlus.Write(usageLine);
+
+        // Stampa i Fixed (in ordine)
+        if (fixedArgs.Count != 0)
         {
-            return int.TryParse(GetOptionValue(flags), out var n) ? n : null;
-        }
-        /// <summary>
-        /// Restituisce il parametro Age, fornito in input argomenti come:
-        /// - --flag 12d -> restituisce il datetime Now - 12 giorni
-        /// - -f 10h -> restituisce il datetime Now - 10 ore
-        /// Char validi: d (giorni), h (ore), m (minuti)
-        /// </summary>
-        /// <param name="flags"></param>
-        /// <returns></returns>
-        /// <exception cref="ArgumentException">Lanciato se il char non è valido</exception>
-        protected DateTime? GetOptionAge(params string[] flags)
-        {
-            var input = GetOptionValue(flags);
-            if (input == null) return null;
-            input = input.ToLower().Trim();
-            char lastChar = input[^1];
-            string numericPart;
-            // controllo che l'ultimo char sia una lettera (d, h, m)
-            if (char.IsLetter(lastChar))
+            foreach (var fa in fixedArgs)
             {
-                numericPart = input[..^1];
+                string argName = $"<{fa.Attr!.Name}>".PadRight(20);
+                ConsolePlus.Write($"  [White]{argName}[/] : {fa.Attr.Description}");
             }
-            else
-            {
-                // se non ce la lettera default sono i giorni
-                numericPart = input;
-                lastChar = 'd';
-            }
-            // converto la parte numerica 
-            // INFO: per il momento nessun Exception
-            if (!int.TryParse(numericPart, out int value)) return null;
-            // calcolo la data
-            return lastChar switch
-            {
-                'd' => DateTime.Now.AddDays(-value),
-                'h' => DateTime.Now.AddHours(-value),
-                'm' => DateTime.Now.AddMinutes(-value),
-                _ => throw new ArgumentException($"{flags[0]} non supporta '{lastChar}', sono valide solo: d, h, m.")
-            };
+            ConsolePlus.Write(""); // Riga vuota
         }
 
-        /// <summary>
-        /// Verifica se una chiave è presente o meno nelle Options
-        /// </summary>
-        /// <param name="flags"></param>
-        /// <returns></returns>
-        protected bool OptionsContains(params string[] flags)
+        // Stampa le Opzioni
+        if (options.Count != 0)
         {
-            foreach (var flag in flags)
+            ConsolePlus.Write("Opzioni:");
+            foreach (var opt in options)
             {
-                if (!string.IsNullOrEmpty(flag) && Options.ContainsKey(flag))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        public abstract void Help();
-
-        public void PrintWarning(string message)
-        {
-            lock (_printErrorLock)
-            {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"[ ! ] {Name}: {message}");
-                Console.ResetColor();
+                string shortFlag = opt.Attr!.ShortName.HasValue ? $", -{opt.Attr.ShortName}" : "";
+                string flags = $"--{opt.Attr.LongName}{shortFlag}".PadRight(25);
+                ConsolePlus.Write($"  [Cyan]{flags}[/] : {opt.Attr.Description}");
             }
         }
+        ConsolePlus.WriteHr();
+    }
 
-        public void PrintError(string message)
+    private readonly Lock _printErrorLock = new();
+    public void PrintWarning(string message)
+    {
+        lock (_printErrorLock)
         {
-            lock (_printErrorLock)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[!!!] {Name}: {message}");
-                Console.ResetColor();
-            }
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"[ ! ] {Name}: {message}");
+            Console.ResetColor();
+        }
+    }
+    public void PrintError(string message)
+    {
+        lock (_printErrorLock)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[!!!] {Name}: {message}");
+            Console.ResetColor();
         }
     }
 }

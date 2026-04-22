@@ -11,32 +11,32 @@ namespace plugins.count
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 1)
+            // 1. Il parsing magico in una riga
+            var settings = ParseSettings<CountSettings>(args);
+
+            // 2. Gestione Help o argomenti mancanti
+            if (args.Length < 1 || args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
-                Help();
+                PrintHelp<CountSettings>();
                 return;
             }
 
-            string root = args[0] == "." ? Directory.GetCurrentDirectory() : args[0];
+            // 3. Setup del percorso root
+            string root = settings.TargetPath == "." ? Directory.GetCurrentDirectory() : settings.TargetPath;
 
             if (!Directory.Exists(root))
             {
-                PrintError($"il percorso \"{root}\" non esiste");
+                PrintError($"Il percorso \"{root}\" non esiste"); // Assumo tu abbia un PrintError nella classe base o altrove
                 return;
             }
 
-            ParseArguments(args, 1);
-
-            var includeDirectory = OptionsContains("--directory", "-d");
-            var recurse = OptionsContains("--recursive", "-r");
-
-            // creazione dei filtro per il conteggio
+            // 4. Creazione del filtro usando l'oggetto strongly-typed
             var filterOpts = new FileFilterFactory.FilterOptions(
-                Pattern: GetOptionValue("--pattern", "-p"),
-                MatchType: OptionsContains("--fixed", "-f") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
-                IgnoreCase: OptionsContains("--ignore-case", "-i"),
-                ModifiedBefore: GetOptionAge("--since", "-s"),
-                ModifiedAfter: GetOptionAge("--older-than", "-o")
+                Pattern: settings.Pattern,
+                MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
+                IgnoreCase: settings.IgnoreCase,
+                ModifiedBefore: settings.Since, 
+                ModifiedAfter: settings.OlderThan 
             );
 
             FileSystemFilter? fileFilter = null;
@@ -54,9 +54,9 @@ namespace plugins.count
             var fastWalkerOptions = new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
-                RecurseSubdirectories = recurse,
+                RecurseSubdirectories = settings.Recursive,
                 BufferSize = 64 * 1024,
-                ReturnDirectoriesInOutput = includeDirectory,
+                ReturnDirectoriesInOutput = settings.IncludeDirectory,
                 Filter = fileFilter,
                 SingleReader = true
             };
@@ -87,30 +87,11 @@ namespace plugins.count
 
             ConsolePlus.Write($"\n[Cyan]#[/] Conteggio completato:");
             ConsolePlus.Write($"[Cyan]*[/] Files: [Yellow]{filesCount:N0}[/]");
-            if (includeDirectory)
+            if (settings.IncludeDirectory)
             {
                 ConsolePlus.Write($"[Cyan]*[/] Cartelle: [Blue]{dirsCount:N0}[/]");
             }
             ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{(filesCount + dirsCount):N0}[/]");
-        }
-
-        public override void Help()
-        {
-            ConsolePlus.WriteHr();
-            ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]count [DarkGray]<percorso> [opzioni]");
-            ConsolePlus.Write("[Cyan]#[/] - percorso: usa . per la cartella corrente oppure definisci un percorso completo");
-            ConsolePlus.Write("[Cyan]#[/] Opzioni Ricerca:");
-            ConsolePlus.Write("[Cyan]#[/] --directory, -d        : Includi le cartelle nel conteggio");
-            ConsolePlus.Write("[Cyan]#[/] --recursive, -r        : Includi nel conteggio tutte le sotto cartelle");
-            ConsolePlus.Write("[Cyan]#[/] --pattern, -p          : Pattern per filtrare i file da contare");
-            ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i      : Rende case insensitive la ricerca");
-            ConsolePlus.Write("[Cyan]#[/] --fixed, -f            : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
-            ConsolePlus.Write("[Cyan]#[/] --since, -s <data>     : trova i file piu recenti di x (d giorni, h ore, m minuti) - es 12d - 12 giorni");
-            ConsolePlus.Write("[Cyan]#[/] --older-than,-o <data>: trova i file piu vecchi di x (d giorni, h ore, m minuti) - es 5h - 5 ore");
-            ConsolePlus.Write("[Cyan]#[/] Esempi:");
-            ConsolePlus.Write("[Cyan]#[/] - swiss count .");
-            ConsolePlus.Write("[Cyan]#[/] - swiss count . -d -p \"*.txt\" -f");
-            ConsolePlus.WriteHr();
         }
     }
 }

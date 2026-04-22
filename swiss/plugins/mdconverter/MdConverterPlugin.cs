@@ -31,65 +31,52 @@ namespace plugins.mdconverter
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 1)
+            var settings = ParseSettings<MdConverterSettings>(args);
+            if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
-                Help();
+                PrintHelp<MdConverterSettings>();
                 return;
             }
 
             // # ---------------------------------- #
             // # 1. Parsing e validazione argomenti #
             // # ---------------------------------- #
-            string mdPath = args[0];
-            if (string.IsNullOrEmpty(mdPath))
-            {
-                PrintError("Non è stato definito il percorso del file Markdown");
-                return;
-            }
-            if (mdPath.StartsWith("./"))
-            {
-                mdPath = Path.Combine(Environment.CurrentDirectory, mdPath[2..]);
-            }
+            string mdPath = Path.GetFullPath(settings.TargetPath);
             if (!Path.Exists(mdPath))
             {
-                PrintError($"il file md \"{mdPath}\" non esiste");
+                PrintError($"Il file md \"{mdPath}\" non esiste");
                 return;
             }
-            ParseArguments(args, 1);
             // booleani
-            var convertToPdf = OptionsContains("--pdf", "-p");
-            var keepHtml = OptionsContains("--keephtml", "-k");
-            var darkMode = OptionsContains("--dark", "-d");
+            bool convertToPdf = settings.Pdf;
+            bool keepHtml = settings.KeepHtml;
+            bool darkMode = settings.DarkMode;
             // chiave valore
-            var destPath = GetOptionValue("--destpath", "-dp");
+            string? destPath = settings.DestPath;
             if (!string.IsNullOrEmpty(destPath))
             {
-                if (destPath.StartsWith("./") && destPath.Length > 1) destPath = Path.Combine(Environment.CurrentDirectory, destPath[2..]);
-                if (!Path.Exists(destPath))
+                destPath = Path.GetFullPath(destPath);
+                if (!Directory.Exists(destPath))
                 {
-                    PrintError($"il percorso di destinazione \"{destPath}\" non esiste");
+                    PrintError($"Il percorso di destinazione \"{destPath}\" non esiste");
                     return;
                 }
             }
             // opzioni mermaid
             // - tema
-            string? mermaidTheme = GetOptionValue("--mermaid-theme");
-            if (string.IsNullOrEmpty(mermaidTheme))
-            {
-                mermaidTheme = darkMode ? "dark" : "default";
-            }
+            string mermaidTheme = settings.MermaidTheme ?? (darkMode ? "dark" : "default");
 
             // # ---------------------- #
             // # 2. Conversione file MD #
             // # ---------------------- #
             string htmlFilePath;
-            if (!String.IsNullOrEmpty(destPath))
+            if (!string.IsNullOrEmpty(destPath))
             {
                 htmlFilePath = Path.Combine(destPath, Path.GetFileNameWithoutExtension(mdPath));
             }
             else
             {
-                htmlFilePath = Path.Combine(Path.GetDirectoryName(mdPath), Path.GetFileNameWithoutExtension(mdPath));
+                htmlFilePath = Path.Combine(Path.GetDirectoryName(mdPath) ?? "", Path.GetFileNameWithoutExtension(mdPath));
             }
             htmlFilePath += ".html";
             await using var writer = new StreamWriter(
@@ -563,20 +550,7 @@ namespace plugins.mdconverter
             using StreamReader reader = new(stream);
             return reader.ReadToEnd();
         }
-
-        public override void Help()
-        {
-            ConsolePlus.WriteHr();
-            ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]mdconverter [DarkGray]<percorso> [opzioni]");
-            ConsolePlus.Write("[Cyan]#[/] - percorso: percorso del file .md");
-            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
-            ConsolePlus.Write("[Cyan]#[/] --pdf, -p       : converti in pdf");
-            ConsolePlus.Write("[Cyan]#[/] --keephtml, -k  : se converti in pdf e vuoi mantenere l'html");
-            ConsolePlus.Write("[Cyan]#[/] --destpath, -dp : path di destinazione del file generato");
-            ConsolePlus.Write("[Cyan]#[/] --dark, -d      : genera il documento in dark mode");
-            ConsolePlus.Write("[Cyan]#[/] Esempi:");
-            ConsolePlus.Write("[Cyan]#[/] - swiss mdconverter .readme.md [DarkGray]-> converte il file readme.md contenuto nella cartella corrente in html[/]");
-            ConsolePlus.Write("[Cyan]#[/] - swiss mdconverter C:/folder/readme.md -p -k [DarkGray]-> converte il file readme.md indicato in pdf mantenendo anche il file html[/]");
+        /*  TODO: Trovare il modo di includere queste
             ConsolePlus.Write("[Cyan]#[/] Feature supportate:");
             ConsolePlus.Write("[Cyan]#[/] - Google Icons (inserendo il nome delle icone in [Cyan]::nome_icona::[/])");
             ConsolePlus.Write("[Cyan]#[/] - KateX (tramite blocchi inline [Cyan]$$[/] e blocchi interi [Cyan]$$...$$[/])");
@@ -584,7 +558,6 @@ namespace plugins.mdconverter
             ConsolePlus.Write("[Cyan]#[/] - Grafici tramite Mermaid.JS (live editor qui: https://mermaid.ai/live/edit), opzioni:");
             ConsolePlus.Write("[Cyan]#[/]   --mermaid-theme : definisci il tema che preferisci per i grafici");
             ConsolePlus.Write("[Cyan]#[/] - Github notes (tramite costrutti \"> [!WARNING|NOTE...]\")");
-            ConsolePlus.WriteHr();
-        }
+        */
     }
 }

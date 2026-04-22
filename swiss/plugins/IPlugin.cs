@@ -3,6 +3,6 @@ interface IPlugin
     string Name { get; }
     string Description { get; }
     Task RunAsync(string[] args, CancellationToken ct);
-    void Help();
+    void PrintHelp();
     void PrintError(string message);
 }

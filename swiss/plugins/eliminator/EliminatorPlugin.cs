@@ -17,9 +17,11 @@ namespace plugins.eliminator
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 1)
+            var settings = ParseSettings<EliminatorSettings>(args);
+
+            if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
-                Help();
+                PrintHelp<EliminatorSettings>();
                 return;
             }
 
@@ -27,19 +29,17 @@ namespace plugins.eliminator
             string? targetPath = ParsePath(args[0]);
             if (string.IsNullOrEmpty(targetPath)) return;
 
-            ParseArguments(args, 1);
-
             // flag booleani
-            bool isDebug = OptionsContains("--debug", "-d");
-            bool isRecursive = OptionsContains("--recursive", "-r");
-            int threadNumber = GetOptionInt("--threads", "-t") ?? Environment.ProcessorCount;
+            bool isDebug = settings.Debug;
+            bool isRecursive = settings.Recursive;
+            int threadNumber = settings.Threads ?? Environment.ProcessorCount;
             // filtri opzioni
             var filterOpts = new FileFilterFactory.FilterOptions(
-                Pattern: GetOptionValue("--pattern", "-p"),
-                MatchType: OptionsContains("--fixed", "-f") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
-                IgnoreCase: OptionsContains("--ignore-case", "-i"),
-                ModifiedBefore: GetOptionAge("--since", "-s"),
-                ModifiedAfter: GetOptionAge("--older-than", "-o")
+                Pattern: settings.Pattern,
+                MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
+                IgnoreCase: settings.IgnoreCase,
+                ModifiedBefore: settings.Since,
+                ModifiedAfter: settings.OlderThan
             );
 
             var fileFilter = FileFilterFactory.CreateFilter(filterOpts);
@@ -249,27 +249,6 @@ namespace plugins.eliminator
             Console.WriteLine($"- File cancellati  : {totalDropped}");
             Console.WriteLine($"- Spazio coinvolto : {Formatter.Bytes(totalBytesSaved)}");
             Console.ResetColor();
-        }
-
-        public override void Help()
-        {
-            ConsolePlus.WriteHr();
-            ConsolePlus.Write("[Cyan]#[/] Uso: [Yellow]swiss [Magenta]eliminator [DarkGray]<percorso> [opzioni]");
-            ConsolePlus.Write("[Cyan]#[/] - percorso : usa . per la cartella corrente oppure definisci un percorso completo");
-            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
-            ConsolePlus.Write("[Cyan]#[/]  --regex <pattern>     : Filtra i file in base a un'espressione regolare sul nome");
-            ConsolePlus.Write("[Cyan]#[/]  --ignore-case, -i     : Rende case insensitive la regex");
-            ConsolePlus.Write("[Cyan]#[/]  --older-than <giorni> : Colpisce solo i file più vecchi di X giorni");
-            ConsolePlus.Write("[Cyan]#[/]  --date-type <m|c|a>   : Tipo di data per --older-than (m=Modifica, c=Creazione, a=Accesso). Default: m");
-            ConsolePlus.Write("[Cyan]#[/]  --backup-path <path>  : Invece di eliminare, sposta i file in questa cartella e genera un log CSV");
-            ConsolePlus.Write("[Cyan]#[/]  --rollback            : Ripristina i file dalle posizioni di un backup precedente");
-            ConsolePlus.Write("[Cyan]#[/]  --debug, -d           : Simula l'operazione senza toccare i file sul disco");
-            ConsolePlus.Write("[Cyan]#[/]  --recursive, -r       : Scansiona anche le sottocartelle");
-            ConsolePlus.Write("[Cyan]#[/]  --force, -f, -y       : Procedi senza chiedere nessuna conferma di esecuzione");
-            ConsolePlus.Write("[Cyan]#[/]  --dirs                : Applica i filtri e le operazioni alle CARTELLE anziché ai file");
-            ConsolePlus.Write("[Cyan]#[/]  --parallel, -p        : Esegue l'operazione in multithreading");
-            ConsolePlus.Write("[Cyan]#[/]  --threads, -t <num>   : Specifica il numero massimo di thread (default: numero di core della CPU)");
-            ConsolePlus.WriteHr();
         }
     }
 }

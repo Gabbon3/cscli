@@ -1,4 +1,5 @@
 ﻿using lib.console;
+using plugins.grep;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -14,17 +15,21 @@ namespace plugins.cripto
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            ParseArguments(args);
-
+            if (args.Length == 0 || args.Contains("--help"))
+            {
+                PrintHelp<CriptoSettings>();
+                return;
+            }
+            var settings = ParseSettings<CriptoSettings>(args);
             // NOME CHIAVE DPAPI
-            string? dpapiKeyName = Options.TryGetValue("--tpm", out var tkn) ? tkn : Options.TryGetValue("-k", out var tk) ? tk : null;
+            string? dpapiKeyName = settings.KeyName;
             if (!string.IsNullOrEmpty(dpapiKeyName))
             {
                 KeyPath = GetKeyPath(dpapiKeyName);
             }
 
             // SETUP
-            bool isSetup = Options.ContainsKey("--setup") || Options.ContainsKey("-s");
+            bool isSetup = settings.Setup;
             if (isSetup && string.IsNullOrEmpty(dpapiKeyName))
             {
                 PrintError("Devi identificare la chiave che andrai a salvare utilizzando il comando --tpm | -k 'nome_chiave'");
@@ -45,7 +50,7 @@ namespace plugins.cripto
             }
 
             // TARGET CHECK
-            var target = Options.TryGetValue("--target", out var trg) ? trg : Options.TryGetValue("-t", out var tr) ? tr : null;
+            string? target = settings.Target;
             if (string.IsNullOrEmpty(target))
             {
                 PrintError("Nessun target definito, utilizza --target | -t 'percorso file'");
@@ -69,17 +74,17 @@ namespace plugins.cripto
             // ESECUZIONE
             try
             {
-                if (Options.ContainsKey("--enc"))
+                if (settings.Enc)
                 {
                     await EncryptFileStreaming(target, aesKey);
                 }
-                else if (Options.ContainsKey("--dec"))
+                else if (settings.Dec)
                 {
                     await DecryptFileStreaming(target, aesKey);
                 }
                 else
                 {
-                    Help();
+                    PrintHelp<GrepSettings>();
                 }
             }
             finally
@@ -260,22 +265,6 @@ namespace plugins.cripto
                 fsOut.Close();
                 File.Delete(outPath);
             }
-        }
-
-        public override void Help()
-        {
-            ConsolePlus.WriteHr();
-            ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]cripto [DarkGray][opzioni]");
-            ConsolePlus.WriteHr();
-            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
-            ConsolePlus.Write("[Cyan]#[/]   [Yellow]--setup | -s[/]      Configura la Master Password legata a Windows Hello/Utente");
-            ConsolePlus.Write("[Cyan]#[/]   [Yellow]-k[/]                Specifica il nome della chiave DPAPI da utilizzare");
-            ConsolePlus.Write("[Cyan]#[/]   [Yellow]--target | -t[/]     Specifica il percorso del file");
-            ConsolePlus.Write("[Cyan]#[/]   [Yellow]--enc[/]             Cifra il target");
-            ConsolePlus.Write("[Cyan]#[/]   [Yellow]--dec[/]             Decifra il target");
-            ConsolePlus.WriteHr();
-            ConsolePlus.Write("[Cyan]#[/] Esempio Setup:   [Gray]swiss cripto --setup -k Lavoro[/]");
-            ConsolePlus.Write("[Cyan]#[/] Esempio Cifra:   [Gray]swiss cripto --enc -t appunti.md -k Lavoro[/]");
         }
     }
 }

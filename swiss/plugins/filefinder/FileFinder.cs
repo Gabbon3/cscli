@@ -30,69 +30,46 @@ namespace plugins.filefinder
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 2)
+            var settings = ParseSettings<FindSettings>(args);
+            if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
-                Help();
+                PrintHelp<FindSettings>();
                 return;
             }
-            string root = args[0];
-            string? pattern = args[1];
+            
+            string root = ParsePath(settings.TargetPath, true)!;
+            string? pattern = string.IsNullOrEmpty(settings.Pattern) ? null : settings.Pattern;
 
-            if (root == ".")
-            {
-                root = Directory.GetCurrentDirectory();
-            }
-            else if (!Directory.Exists(root))
-            {
-                PrintError($"il percorso \"{root}\" non esiste");
-                return;
-            }
-
-            if (string.IsNullOrEmpty(pattern))
-            {
-                pattern = null;
-            }
-
-            ParseArguments(args, 2);
-
-            // --- LETTURA OPZIONI RANKING ---
-            FinderOptionsConfig.Oldest = OptionsContains("--oldest", "-O");
-            FinderOptionsConfig.Newest = OptionsContains("--newest", "-N");
-            FinderOptionsConfig.Biggest = OptionsContains("--biggest", "-B");
-            FinderOptionsConfig.Smallest = OptionsContains("--smallest", "-S");
-            bool isRanking = FinderOptionsConfig.Oldest ||
-                            FinderOptionsConfig.Newest ||
-                            FinderOptionsConfig.Biggest ||
-                            FinderOptionsConfig.Smallest;
-
-            // parsing del limite, default 10
-            FinderOptionsConfig.Limit = GetOptionInt("-l", "--limit") ?? 10;
-
-            // pre calcolo delle strategie
+            // RANKING
+            bool isRanking = settings.Oldest || settings.Newest || settings.Biggest || settings.Smallest;
             if (isRanking)
             {
-                // alloco la coda solo se serve
                 PriorityQueue = new PriorityQueue<StackFileInfo, long>();
-                // Precalcolo come si estrae la priorità senza fare if nel ciclo
-                if (FinderOptionsConfig.Biggest) _prioritySelector = item => item.Length;
-                else if (FinderOptionsConfig.Smallest) _prioritySelector = item => -item.Length;
-                else if (FinderOptionsConfig.Oldest) _prioritySelector = item => -item.LastWriteTime.Ticks;
-                else if (FinderOptionsConfig.Newest) _prioritySelector = item => item.LastWriteTime.Ticks;
-                // La strategia per ogni elemento sarà di usare la coda
+                // --- LETTURA OPZIONI RANKING ---
+                FinderOptionsConfig.Oldest = settings.Oldest;
+                FinderOptionsConfig.Newest = settings.Newest;
+                FinderOptionsConfig.Biggest = settings.Biggest;
+                FinderOptionsConfig.Smallest = settings.Smallest;
+                FinderOptionsConfig.Limit = settings.Limit;
+                if (settings.Biggest) _prioritySelector = item => item.Length;
+                else if (settings.Smallest) _prioritySelector = item => -item.Length;
+                else if (settings.Oldest) _prioritySelector = item => -item.LastWriteTime.Ticks;
+                else if (settings.Newest) _prioritySelector = item => item.LastWriteTime.Ticks;
+
                 _processItemStrategy = RankItem;
             }
             else
             {
-                // La strategia di base è la stampa immediata
                 _processItemStrategy = PrintSimpleMatch;
             }
 
+            // FILTRI
             var filterOpts = new FileFilterFactory.FilterOptions(
                 Pattern: pattern,
-                MatchType: OptionsContains("--fixed", "-f") ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
-                IgnoreCase: OptionsContains("--ignore-case", "-i"),
-                ModifiedBefore: GetOptionAge("--since", "-s"),
-                ModifiedAfter: GetOptionAge("--older-than", "-o")
+                MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
+                IgnoreCase: settings.IgnoreCase,
+                ModifiedBefore: settings.Since,
+                ModifiedAfter: settings.OlderThan
             );
 
             FileSystemFilter? fileFilter;
@@ -111,6 +88,7 @@ namespace plugins.filefinder
                 return;
             }
 
+            // FASTWALKER OPTIONS
             var fastWalkerOptions = new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
@@ -118,7 +96,7 @@ namespace plugins.filefinder
                 Filter = fileFilter,
                 BufferSize = 64 * 1024,
                 SingleReader = true,
-                ReturnDirectoriesInOutput = OptionsContains("--dirs", "-d")
+                ReturnDirectoriesInOutput = settings.Dirs
             };
 
             // avvio il walker
@@ -180,30 +158,6 @@ namespace plugins.filefinder
             {
                 PriorityQueue.Dequeue().Dispose();
             }
-        }
-
-        public override void Help()
-        {
-            ConsolePlus.WriteHr();
-            ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]find [DarkGray]<percorso> <pattern> [opzioni]");
-            ConsolePlus.Write("[Cyan]#[/] - percorso: usa . per la cartella corrente oppure definisci un percorso completo");
-            ConsolePlus.Write("[Cyan]#[/] - pattern: la stringa da usare per la ricerca, regex di default");
-            ConsolePlus.Write("[Cyan]#[/] Opzioni Ricerca:");
-            ConsolePlus.Write("[Cyan]#[/] --dirs, -d             : Includi le cartelle nella ricerca");
-            ConsolePlus.Write("[Cyan]#[/] --ignore-case, -i      : Rende case insensitive la ricerca");
-            ConsolePlus.Write("[Cyan]#[/] --fixed, -f            : non utilizza la regex ma verifica se il pattern è contenuto nel nome file (+ veloce)");
-            ConsolePlus.Write("[Cyan]#[/] --since, -s <data>     : trova i file piu recenti di x (d giorni, h ore, m minuti) - es 12d - 12 giorni");
-            ConsolePlus.Write("[Cyan]#[/] --older-than,-o <data>: trova i file piu vecchi di x (d giorni, h ore, m minuti) - es 5h - 5 ore");
-            ConsolePlus.Write("[Cyan]#[/] Opzioni Classifica:");
-            ConsolePlus.Write("[Cyan]#[/] --biggest, -B         : Restituisce i file più grandi");
-            ConsolePlus.Write("[Cyan]#[/] --smallest, -S        : Restituisce i file più piccoli");
-            ConsolePlus.Write("[Cyan]#[/] --newest, -N          : Restituisce i file più recenti");
-            ConsolePlus.Write("[Cyan]#[/] --oldest, -O          : Restituisce i file più vecchi");
-            ConsolePlus.Write("[Cyan]#[/] --limit, -l <num> : Limita il numero di risultati nella classifica (default 10)");
-            ConsolePlus.Write("[Cyan]#[/] Esempi:");
-            ConsolePlus.Write("[Cyan]#[/] - swiss find C:\\Users\\ \".*\\.pdf\"");
-            ConsolePlus.Write("[Cyan]#[/] - swiss find . \"\" --biggest --limit 5");
-            ConsolePlus.WriteHr();
         }
     }
 }

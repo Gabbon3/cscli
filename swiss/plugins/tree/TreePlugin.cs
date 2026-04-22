@@ -31,33 +31,17 @@ namespace plugins.tree
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 2)
+            var settings = ParseSettings<TreeSettings>(args);
+            if (args.Contains("--help") || args.Length < 2)
             {
-                Help();
+                PrintHelp<TreeSettings>();
                 return;
             }
 
-            string rootPath = args[0];
+            string rootPath = ParsePath(settings.TargetPath, true)!;
+            long minSizeBytes = (long)(settings.MinSizeGb * 1024 * 1024 * 1024);
 
-            if (rootPath == ".")
-            {
-                rootPath = Directory.GetCurrentDirectory();
-            }
-            else if (!Directory.Exists(rootPath))
-            {
-                PrintError($"il percorso \"{rootPath}\" non esiste");
-                return;
-            }
-
-            if (!double.TryParse(args[1], out double minSizeGb))
-            {
-                PrintError("Il valore minsize deve essere un numero valido.");
-                return;
-            }
-
-            long minSizeBytes = (long)(minSizeGb * 1024 * 1024 * 1024);
-
-            Console.WriteLine($"Analisi di \"{rootPath}\" (Filtro: > {minSizeGb:N2} GB)...");
+            Console.WriteLine($"Analisi di \"{rootPath}\" (Filtro: > {settings.MinSizeGb:N2} GB)...");
 
             var result = await ScanSystemAsync(rootPath, minSizeBytes, ct);
 
@@ -68,7 +52,7 @@ namespace plugins.tree
             }
             else
             {
-                Console.WriteLine($"\nNessuna cartella supera la soglia di {minSizeGb:N2} GB (Dimensione totale: {Formatter.Bytes(result.TotalSize)}).");
+                Console.WriteLine($"\nNessuna cartella supera la soglia di {settings.MinSizeGb:N2} GB (Dimensione totale: {Formatter.Bytes(result.TotalSize)}).");
             }
         }
 
@@ -245,17 +229,6 @@ namespace plugins.tree
             {
                 PrintTree(node.Children[i], indent, i == node.Children.Count - 1);
             }
-        }
-
-        public override void Help()
-        {
-            Console.WriteLine("------------------------------------------------");
-            Console.WriteLine("Utilizzo comando tree:");
-            Console.WriteLine("swiss tree <root_path> <min_size_gb>");
-            Console.WriteLine("Esempio: swiss tree C:\\Users 1.5");
-            Console.WriteLine("Mostra la struttura delle cartelle che superano 1.5 GB");
-            Console.WriteLine("Ogni record contiene il nome della cartella seguito da (numero files, numero cartelle, peso)");
-            Console.WriteLine("------------------------------------------------");
         }
     }
 }

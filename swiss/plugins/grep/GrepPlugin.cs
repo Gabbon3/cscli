@@ -54,21 +54,15 @@ namespace plugins.grep
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            if (args.Length < 2)
+            var settings = ParseSettings<GrepSettings>(args);
+            if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath) || string.IsNullOrEmpty(settings.Pattern))
             {
-                Help();
+                PrintHelp<GrepSettings>();
                 return;
             }
 
-            string root = args[0] == "." ? Directory.GetCurrentDirectory() : args[0];
-            if (!Directory.Exists(root))
-            {
-                PrintError($"il percorso \"{root}\" non esiste");
-                return;
-            }
-
-            string pattern = args[1];
-            ParseArguments(args, 2);
+            string root = ParsePath(settings.TargetPath, true)!;
+            string pattern = settings.Pattern;
 
             if (pattern.Length == 0)
             {
@@ -81,7 +75,7 @@ namespace plugins.grep
             // # --------------------- #
             // # Parsing delle opzioni #
             // # --------------------- #
-            IgnoreCase = OptionsContains("-i", "--ignore-case");
+            IgnoreCase = settings.IgnoreCase;
             var patternList = new ReadOnlyMemory<byte>[wordsToSearch.Length];
             PatternLengths = new int[wordsToSearch.Length]; // Inizializza l'array
 
@@ -99,7 +93,7 @@ namespace plugins.grep
 
             // cartelle da escludere
             var excludeDirs = new HashSet<string>(DefaultExcludeDirs, StringComparer.OrdinalIgnoreCase);
-            var excludeDirsOptions = GetOptionValue("--exclude-dir", "-ex");
+            var excludeDirsOptions = settings.ExcludeDirs;
             if (!string.IsNullOrEmpty(excludeDirsOptions))
             {
                 foreach (var dir in excludeDirsOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -109,7 +103,7 @@ namespace plugins.grep
             }
 
             // cartelle da includere rispetto a quelle di default
-            var includeDirsOptions = GetOptionValue("-in", "--include-dir");
+            var includeDirsOptions = settings.IncludeDirs;
             if (!string.IsNullOrEmpty(includeDirsOptions))
             {
                 foreach (var dir in includeDirsOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -120,7 +114,7 @@ namespace plugins.grep
 
             // pattern glob per escludere files
             var includeGlobs = new List<string>();
-            var GlobOptions = GetOptionValue("-g", "--glob");
+            var GlobOptions = settings.Glob;
             if (!string.IsNullOrEmpty(GlobOptions))
             {
                 foreach (var glob in GlobOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -401,19 +395,6 @@ namespace plugins.grep
                 span = span[(index + 1)..];
             }
             return count;
-        }
-
-        public override void Help()
-        {
-            ConsolePlus.Write("[Cyan]#[DarkGray] ------------------------------------------------ [Cyan]#[/]");
-            ConsolePlus.Write("[Cyan]#[/] Utilizzo: [Yellow]swiss [Magenta]grep [DarkGray]<percorso> <pattern> [opzioni]");
-            ConsolePlus.Write("[Cyan]#[/] <pattern>                   : cerca più parole contemporaneamente separandole con [Cyan]|[/]");
-            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
-            ConsolePlus.Write("[Cyan]#[/]   --ignore-case, -i         : Ricerca case insensitive (ASCII)");
-            ConsolePlus.Write("[Cyan]#[/]   --exclude-dir <dir,...>   : Aggiunge cartelle da escludere");
-            ConsolePlus.Write("[Cyan]#[/]   --include-dir <dir,...>   : Riabilita cartelle escluse di default");
-            ConsolePlus.Write("[Cyan]#[/]   --glob <pattern,...>      : Esclude file per pattern (es. *.min.js)");
-            ConsolePlus.Write("[Cyan]#[DarkGray] ------------------------------------------------ [Cyan]#[/]");
         }
     }
 }
