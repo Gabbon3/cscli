@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using lib.console;
 
@@ -11,7 +12,7 @@ public abstract class Plugin
     /// <summary>
     /// Parsa automaticamente gli args e restituisce l'oggetto Settings popolato
     /// </summary>
-    protected static TSettings ParseSettings<TSettings>(string[] args) where TSettings : new()
+    protected static TSettings ParseSettings<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] TSettings>(string[] args) where TSettings : new()
     {
         var settings = new TSettings();
         var props = typeof(TSettings).GetProperties();
@@ -107,6 +108,18 @@ public abstract class Plugin
     }
 
     /// <summary>
+    /// Parsa il pattern da usare nelle ricerche dei match
+    /// </summary>
+    /// <param name="pattern">usare * o vuoto o null per includere tutto</param>
+    /// <returns></returns>
+    protected string? ParseMatchPattern(string? pattern)
+    {
+        // Restituisco null se * (cioe voglio tutti i match) e se è gia null o vuoto
+        if (pattern == "*" || string.IsNullOrEmpty(pattern)) return null;
+        return pattern;
+    }
+
+    /// <summary>
     /// Helper per convertire le stringhe nei tipi giusti (int, string, bool, ecc.)
     /// </summary>
     /// <param name="obj">Opzione delle settings da valorizzare</param>
@@ -127,8 +140,19 @@ public abstract class Plugin
         else if (targetType == typeof(bool) && bool.TryParse(value, out bool boolVal))
             prop.SetValue(obj, boolVal);
         // datetime
-        else if (targetType == typeof(DateTime) && DateTime.TryParse(value, out DateTime datetimeVal))
-            prop.SetValue(obj, datetimeVal);
+        else if (targetType == typeof(DateTime))
+        {
+            // provo a vedere se l'utente ha passato una data di quel tipo (es. "12d", "5h")
+            if (TryParseRelativeDate(value, out DateTime relativeDate))
+            {
+                prop.SetValue(obj, relativeDate);
+            }
+            // fallback parsing standard ("2024-10-25")
+            else if (DateTime.TryParse(value, out DateTime standardDate))
+            {
+                prop.SetValue(obj, standardDate);
+            }
+        }
         // double
         else if (targetType == typeof(double) && double.TryParse(value, out double doubleVal))
             prop.SetValue(obj, doubleVal);
@@ -136,10 +160,55 @@ public abstract class Plugin
     }
 
     /// <summary>
+    /// Calcola la data relativa passando stringhe come "12d", "5h" o solo "12" (default giorni).
+    /// Restituisce la DateTime corrispettiva sottraendo il valore indicato.
+    /// </summary>
+    private static bool TryParseRelativeDate(string value, out DateTime result)
+    {
+        result = default;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        value = value.Trim().ToLowerInvariant();
+
+        char unit = value[^1];
+        string amountStr;
+
+        // Se l'ultimo carattere è un numero, assumiamo che l'utente non abbia messo l'unità.
+        // Usiamo 'd' (giorni) di default e teniamo l'intera stringa come numero.
+        if (char.IsDigit(unit))
+        {
+            unit = 'd';
+            amountStr = value;
+        }
+        else
+        {
+            amountStr = value[..^1];
+        }
+
+        if (double.TryParse(amountStr, out double amount))
+        {
+            result = unit switch
+            {
+                'd' => DateTime.Now.AddDays(-amount),
+                'h' => DateTime.Now.AddHours(-amount),
+                'm' => DateTime.Now.AddMinutes(-amount),
+                's' => DateTime.Now.AddSeconds(-amount),
+                _ => default
+            };
+
+            return result != default;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Stampa dell'Help standardizzata basata sulla struttura dei settings
     /// </summary>
     /// <typeparam name="TSettings"></typeparam>
-    public void PrintHelp<TSettings>()
+    public void PrintHelp<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] TSettings>(bool printEndLine = true)
     {
         var properties = typeof(TSettings).GetProperties();
 
@@ -175,23 +244,28 @@ public abstract class Plugin
             foreach (var fa in fixedArgs)
             {
                 string argName = $"<{fa.Attr!.Name}>".PadRight(20);
-                ConsolePlus.Write($"  [White]{argName}[/] : {fa.Attr.Description}");
+                ConsolePlus.Write($"[Cyan]#[/] [White]{argName}[/] : {fa.Attr.Description}");
             }
-            ConsolePlus.Write(""); // Riga vuota
+            ConsolePlus.Write("[Cyan]#[/]");
         }
 
         // Stampa le Opzioni
         if (options.Count != 0)
         {
-            ConsolePlus.Write("Opzioni:");
+            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
             foreach (var opt in options)
             {
                 string shortFlag = opt.Attr!.ShortName.HasValue ? $", -{opt.Attr.ShortName}" : "";
                 string flags = $"--{opt.Attr.LongName}{shortFlag}".PadRight(25);
-                ConsolePlus.Write($"  [Cyan]{flags}[/] : {opt.Attr.Description}");
+                ConsolePlus.Write($"[Cyan]#[/] [Green]{flags}[/] : {opt.Attr.Description}");
             }
         }
-        ConsolePlus.WriteHr();
+        if (printEndLine) ConsolePlus.WriteHr();
+    }
+
+    public virtual void Help()
+    {
+        PrintWarning("Nessun help definito");
     }
 
     private readonly Lock _printErrorLock = new();

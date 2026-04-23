@@ -17,7 +17,7 @@ namespace plugins.count
             // 2. Gestione Help o argomenti mancanti
             if (args.Length < 1 || args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
-                PrintHelp<CountSettings>();
+                Help();
                 return;
             }
 
@@ -32,11 +32,11 @@ namespace plugins.count
 
             // 4. Creazione del filtro usando l'oggetto strongly-typed
             var filterOpts = new FileFilterFactory.FilterOptions(
-                Pattern: settings.Pattern,
+                Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
-                ModifiedBefore: settings.Since, 
-                ModifiedAfter: settings.OlderThan 
+                ModifiedBefore: settings.Since,
+                ModifiedAfter: settings.OlderThan
             );
 
             FileSystemFilter? fileFilter = null;
@@ -92,6 +92,11 @@ namespace plugins.count
                 ConsolePlus.Write($"[Cyan]*[/] Cartelle: [Blue]{dirsCount:N0}[/]");
             }
             ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{(filesCount + dirsCount):N0}[/]");
+        }
+
+        public override void Help()
+        {
+            PrintHelp<CountSettings>();
         }
     }
 }

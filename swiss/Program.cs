@@ -13,8 +13,8 @@ using plugins.grep;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.9.0";
-const string versionDescription = "Librerie interne ottimizzate";
+const string version = "1.9.1";
+const string versionDescription = "Interfacce CLI migliorate";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -90,7 +90,7 @@ if (pluginMeta != null)
 
     if (pluginArgs.Length > 0 && (pluginArgs[0] == "--help" || pluginArgs[0] == "-h"))
     {
-        plugin.PrintHelp();
+        plugin.Help();
         return;
     }
     // # STATS

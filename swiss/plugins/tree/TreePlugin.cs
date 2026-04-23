@@ -34,7 +34,7 @@ namespace plugins.tree
             var settings = ParseSettings<TreeSettings>(args);
             if (args.Contains("--help") || args.Length < 2)
             {
-                PrintHelp<TreeSettings>();
+                Help();
                 return;
             }
 
@@ -229,6 +229,11 @@ namespace plugins.tree
             {
                 PrintTree(node.Children[i], indent, i == node.Children.Count - 1);
             }
+        }
+
+        public override void Help()
+        {
+            PrintHelp<TreeSettings>();
         }
     }
 }

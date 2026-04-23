@@ -21,7 +21,7 @@ namespace plugins.eliminator
 
             if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
-                PrintHelp<EliminatorSettings>();
+                Help();
                 return;
             }
 
@@ -35,7 +35,7 @@ namespace plugins.eliminator
             int threadNumber = settings.Threads ?? Environment.ProcessorCount;
             // filtri opzioni
             var filterOpts = new FileFilterFactory.FilterOptions(
-                Pattern: settings.Pattern,
+                Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
                 ModifiedBefore: settings.Since,
@@ -190,20 +190,16 @@ namespace plugins.eliminator
             bool isProcessing = true;
             var monitorTask = Task.Run(async () =>
             {
-                // se il debug è attivo allora non attivo la ui
-                if (isDebug)
-                {
-                    return;
-                }
-                // preparazione righe vuote
+                if (isDebug) return;
+
                 for (int i = 0; i < threadNumber; i++) Console.WriteLine();
-                int consoleWidth = 80; // Default di sicurezza
-                try { consoleWidth = Console.WindowWidth; } catch { } // Ignora eccezioni se in esecuzione remota/re-diretta
+                int consoleWidth = 80; 
+                try { consoleWidth = Console.WindowWidth; } catch { } 
+
                 try
                 {
                     while (isProcessing && !ct.IsCancellationRequested)
                     {
-                        // Spostiamo il cursore in su di 'n' righe per sovrascrivere esattamente il nostro blocco
                         try { Console.SetCursorPosition(0, Console.CursorTop - threadNumber); } catch { }
 
                         for (int i = 0; i < threadNumber; i++)
@@ -211,13 +207,23 @@ namespace plugins.eliminator
                             int totalDropped = droppedFilesCountList[i];
                             int currentBatch = totalDropped / 4096;
                             int currentProgress = totalDropped % 4096;
-                            // Calcoliamo la lunghezza della barra (max 40 caratteri, 1 trattino ogni ~100 file)
+                            
                             int dashesCount = currentProgress / 102;
                             string bar = new string('-', dashesCount).PadRight(40, ' ');
-                            // Formattiamo la stringa: Thread 01 [Batch 005] 0020480 |-------    |
-                            string line = $"T-{i:D2} [B-{currentBatch:D3}] {totalDropped:D7} |{bar}|";
-                            // PadRight pulisce i "rimasugli" di testo se la riga precedente era più lunga
-                            Console.WriteLine(line.PadRight(consoleWidth - 1));
+
+                            string threadStr = $"T-{i:D2}";
+                            string batchNum = currentBatch.ToString().PadLeft(3);
+                            string dropStr = totalDropped.ToString().PadLeft(7);
+
+                            // FIX: Usiamo le parentesi tonde (B-  0) per non far impazzire il parser ConsolePlus
+                            string coloredLine = $"[Yellow]{threadStr}[/] [DarkGray](B:[/][White]{batchNum}[/][DarkGray])[/] [Cyan]{dropStr}[/] [DarkGray]|[/][Green]{bar}[/][DarkGray]|[/]";
+
+                            // La lunghezza visibile ora è esattamente 63 caratteri (i tag spariscono)
+                            int visibleLength = 63;
+                            string padding = new string(' ', Math.Max(0, consoleWidth - 1 - visibleLength));
+
+                            // newLine: true ora funzionerà perfettamente senza creare scalette
+                            ConsolePlus.Write(coloredLine + padding, newLine: true);
                         }
                         await Task.Delay(150, ct);
                     }
@@ -244,11 +250,16 @@ namespace plugins.eliminator
                 totalBytesSaved += bytesSavedList[i];
             }
             // ---
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"\n\nOperazione Conclusa.");
-            Console.WriteLine($"- File cancellati  : {totalDropped}");
-            Console.WriteLine($"- Spazio coinvolto : {Formatter.Bytes(totalBytesSaved)}");
-            Console.ResetColor();
+            ConsolePlus.WriteHr(25);            
+            ConsolePlus.Write($"[Cyan]#[/] Operazione Conclusa.");
+            ConsolePlus.Write($"[Cyan]*[/] File cancellati  : {totalDropped}");
+            ConsolePlus.Write($"[Cyan]*[/] Spazio coinvolto : {Formatter.Bytes(totalBytesSaved)}");
+            ConsolePlus.WriteHr(25);
+        }
+
+        public override void Help()
+        {
+            PrintHelp<EliminatorSettings>();
         }
     }
 }

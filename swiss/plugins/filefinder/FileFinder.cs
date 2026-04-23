@@ -33,12 +33,12 @@ namespace plugins.filefinder
             var settings = ParseSettings<FindSettings>(args);
             if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
-                PrintHelp<FindSettings>();
+                Help();
                 return;
             }
             
             string root = ParsePath(settings.TargetPath, true)!;
-            string? pattern = string.IsNullOrEmpty(settings.Pattern) ? null : settings.Pattern;
+            string? pattern = ParseMatchPattern(settings.Pattern);
 
             // RANKING
             bool isRanking = settings.Oldest || settings.Newest || settings.Biggest || settings.Smallest;
@@ -158,6 +158,11 @@ namespace plugins.filefinder
             {
                 PriorityQueue.Dequeue().Dispose();
             }
+        }
+
+        public override void Help()
+        {
+            PrintHelp<FindSettings>();
         }
     }
 }

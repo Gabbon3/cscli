@@ -57,7 +57,7 @@ namespace plugins.grep
             var settings = ParseSettings<GrepSettings>(args);
             if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath) || string.IsNullOrEmpty(settings.Pattern))
             {
-                PrintHelp<GrepSettings>();
+                Help();
                 return;
             }
 
@@ -395,6 +395,11 @@ namespace plugins.grep
                 span = span[(index + 1)..];
             }
             return count;
+        }
+
+        public override void Help()
+        {
+            PrintHelp<GrepSettings>();
         }
     }
 }

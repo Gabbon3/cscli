@@ -17,7 +17,7 @@ namespace plugins.cripto
         {
             if (args.Length == 0 || args.Contains("--help"))
             {
-                PrintHelp<CriptoSettings>();
+                Help();
                 return;
             }
             var settings = ParseSettings<CriptoSettings>(args);
@@ -265,6 +265,11 @@ namespace plugins.cripto
                 fsOut.Close();
                 File.Delete(outPath);
             }
+        }
+
+        public override void Help()
+        {
+            PrintHelp<CriptoSettings>();
         }
     }
 }
