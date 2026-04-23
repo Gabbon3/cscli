@@ -35,8 +35,8 @@ namespace plugins.count
                 Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
-                ModifiedBefore: settings.Since,
-                ModifiedAfter: settings.OlderThan
+                ModifiedBefore: settings.OlderThan,
+                ModifiedAfter: settings.Since
             );
 
             FileSystemFilter? fileFilter = null;
