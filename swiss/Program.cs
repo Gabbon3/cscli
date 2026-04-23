@@ -13,8 +13,8 @@ using plugins.grep;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.9.1";
-const string versionDescription = "Interfacce CLI migliorate";
+const string version = "1.9.2";
+const string versionDescription = "Bug Fix args datetime";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
