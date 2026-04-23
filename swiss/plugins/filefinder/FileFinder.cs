@@ -39,6 +39,8 @@ namespace plugins.filefinder
             
             string root = ParsePath(settings.TargetPath, true)!;
             string? pattern = ParseMatchPattern(settings.Pattern);
+            // default true
+            bool recurse = !settings.NoRecurseSubdirectories;
 
             // RANKING
             bool isRanking = settings.Oldest || settings.Newest || settings.Biggest || settings.Smallest;
@@ -92,7 +94,7 @@ namespace plugins.filefinder
             var fastWalkerOptions = new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
-                RecurseSubdirectories = true,
+                RecurseSubdirectories = recurse,
                 Filter = fileFilter,
                 BufferSize = 64 * 1024,
                 SingleReader = true,

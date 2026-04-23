@@ -27,6 +27,9 @@ namespace plugins.filefinder
         [Option("older-than|o", "Trova i file più vecchi di questa data", "Ricerca")]
         public DateTime? OlderThan { get; set; }
 
+        [Option("no-recurse|r", "Se attivo non ricerca anche nelle sottocartelle", "Ricerca")]
+        public bool NoRecurseSubdirectories { get; set; } = false;
+
         // --- OPZIONI CLASSIFICA ---
         [Option("biggest|B", "Restituisce i file più grandi", "Classifica")]
         public bool Biggest { get; set; }
