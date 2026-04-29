@@ -278,7 +278,7 @@ namespace plugins.mdconverter
                     }
                     // Salto la riga di separazione (es: |---|---|)
                     if (line.Contains("---")) continue;
-                    var cells = line.Split('|', StringSplitOptions.RemoveEmptyEntries);
+                    var cells = line.Split("|", StringSplitOptions.RemoveEmptyEntries);
                     // Se HeaderWritten è ancora false, questa riga è l'header
                     if (!HeaderWritten)
                     {
@@ -527,7 +527,7 @@ namespace plugins.mdconverter
             try
             {
                 using var process = Process.Start(startInfo);
-                await process.WaitForExitAsync(ct);
+                await process!.WaitForExitAsync(ct);
                 ConsolePlus.Write($"[Cyan]#[Green] PDF generato: [Yellow]{pdfFilePath}[/]");
             }
             catch (Exception ex)

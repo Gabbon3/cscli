@@ -50,12 +50,12 @@ public abstract class Plugin
             if (currentArg.StartsWith('-'))
             {
                 bool isLong = currentArg.StartsWith("--");
-                string optName = isLong ? currentArg.Substring(2) : currentArg.Substring(1);
+                string optName = isLong ? currentArg[2..] : currentArg[1..];
 
                 // Cerca la proprietà corrispondente all'attributo
                 var match = optionProps.FirstOrDefault(o =>
                     (isLong && o.Attr!.LongName == optName) ||
-                    (!isLong && o.Attr!.ShortName?.ToString() == optName)
+                    (!isLong && o.Attr!.ShortName == optName)
                 );
 
                 if (match != null)
@@ -255,7 +255,7 @@ public abstract class Plugin
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
             foreach (var opt in options)
             {
-                string shortFlag = opt.Attr!.ShortName.HasValue ? $", -{opt.Attr.ShortName}" : "";
+                string shortFlag = !string.IsNullOrEmpty(opt.Attr!.ShortName) ? $", -{opt.Attr.ShortName}" : "";
                 string flags = $"--{opt.Attr.LongName}{shortFlag}".PadRight(25);
                 ConsolePlus.Write($"[Cyan]#[/] [Green]{flags}[/] : {opt.Attr.Description}");
             }

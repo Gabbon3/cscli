@@ -2,7 +2,7 @@
 using plugins;
 using lib.console;
 // lista plugins
-using plugins.filefinder;
+using plugins.find;
 using plugins.tree;
 using plugins.eliminator;
 using plugins.count;
@@ -13,8 +13,8 @@ using plugins.grep;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.9.2";
-const string versionDescription = "Bug Fix args datetime";
+const string version = "1.9.3";
+const string versionDescription = "Bug Fix Find e Grep";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -29,7 +29,7 @@ Console.CancelKeyPress += (sender, e) =>
 };
 // registro dei plugin
 List<PluginRegistration> plugins = [
-    new("find", "Cerca file nel file system", () => new FileFinder()),
+    new("find", "Cerca file nel file system", () => new FindPlugin()),
     new("tree", "Mostra l'albero delle directory", () => new TreePlugin()),
     new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin()),
     new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),

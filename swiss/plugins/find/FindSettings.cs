@@ -1,4 +1,4 @@
-namespace plugins.filefinder
+namespace plugins.find
 {
     public class FindSettings
     {

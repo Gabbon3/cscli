@@ -4,9 +4,9 @@ using lib.io.stack;
 using lib.console;
 using lib.utils;
 
-namespace plugins.filefinder
+namespace plugins.find
 {
-    class FileFinder : Plugin
+    class FindPlugin : Plugin
     {
         public override string Name => "find";
         public override string Description => "Ricerca di file tramite regex o stringhe fisse, con supporto classifiche (ranking)";
@@ -36,7 +36,7 @@ namespace plugins.filefinder
                 Help();
                 return;
             }
-            
+
             string root = ParsePath(settings.TargetPath, true)!;
             string? pattern = ParseMatchPattern(settings.Pattern);
             // default true
@@ -143,13 +143,20 @@ namespace plugins.filefinder
 
             ConsolePlus.WriteHr();
             ConsolePlus.Write($"[Cyan]#[/] Ricerca conclusa");
-            ConsolePlus.Write($"[Cyan]*[/] Elementi totali analizzati: [Cyan]{matchCount}[/]");
+            ConsolePlus.Write($"[Cyan]#[/] Elementi trovati: [Cyan]{matchCount}[/]");
             ConsolePlus.WriteHr();
         }
 
         private void PrintSimpleMatch(StackFileInfo item)
         {
-            ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
+            if (item.IsDirectory)
+            {
+                ConsolePlus.Write($"[Cyan]{item.AsPathSpan()}[/]");
+            }
+            else
+            {
+                ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
+            }
             item.Dispose();
         }
 

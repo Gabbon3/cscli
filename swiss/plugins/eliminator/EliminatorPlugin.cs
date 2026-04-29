@@ -32,6 +32,7 @@ namespace plugins.eliminator
             // flag booleani
             bool isDebug = settings.Debug;
             bool isRecursive = settings.Recursive;
+            bool dropInstant = settings.DropInstant;
             int threadNumber = settings.Threads ?? Environment.ProcessorCount;
             // filtri opzioni
             var filterOpts = new FileFilterFactory.FilterOptions(
@@ -143,15 +144,26 @@ namespace plugins.eliminator
                             {
                                 filesDroppedCounter++;
                                 droppedFilesCountList[workerId] = filesDroppedCounter;
-                                string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{filesDroppedCounter}.tmp";
-                                if (item.IsDirectory)
-                                {
-                                    Directory.Move(item.GetFullPath(), destPath);
-                                }
-                                else
+                                // Se si decide di cancellare subito
+                                if (dropInstant)
                                 {
                                     bytesSavedList[workerId] += item.Length;
-                                    File.Move(item.GetFullPath(), destPath);
+                                    NativeIO.DeleteFile(item.GetFullPath());
+                                    continue;
+                                }
+                                // altrimenti
+                                else
+                                {
+                                    string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{filesDroppedCounter}.tmp";
+                                    if (item.IsDirectory)
+                                    {
+                                        Directory.Move(item.GetFullPath(), destPath);
+                                    }
+                                    else
+                                    {
+                                        bytesSavedList[workerId] += item.Length;
+                                        File.Move(item.GetFullPath(), destPath);
+                                    }
                                 }
                                 // ogni 4096 elementi cancello la cartella == a n % 4096 == 0
                                 if ((filesDroppedCounter & 4095) == 0)
@@ -164,8 +176,9 @@ namespace plugins.eliminator
                                     batchId++;
                                     currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
                                     Directory.CreateDirectory(currentBatchPath);
-                                    ct.ThrowIfCancellationRequested();
+                                    // controllo se è stato lanciato il ct
                                 }
+                                ct.ThrowIfCancellationRequested();
                             }
                             finally
                             {
@@ -193,8 +206,8 @@ namespace plugins.eliminator
                 if (isDebug) return;
 
                 for (int i = 0; i < threadNumber; i++) Console.WriteLine();
-                int consoleWidth = 80; 
-                try { consoleWidth = Console.WindowWidth; } catch { } 
+                int consoleWidth = 80;
+                try { consoleWidth = Console.WindowWidth; } catch { }
 
                 try
                 {
@@ -207,7 +220,7 @@ namespace plugins.eliminator
                             int totalDropped = droppedFilesCountList[i];
                             int currentBatch = totalDropped / 4096;
                             int currentProgress = totalDropped % 4096;
-                            
+
                             int dashesCount = currentProgress / 102;
                             string bar = new string('-', dashesCount).PadRight(40, ' ');
 
@@ -225,7 +238,7 @@ namespace plugins.eliminator
                             // newLine: true ora funzionerà perfettamente senza creare scalette
                             ConsolePlus.Write(coloredLine + padding, newLine: true);
                         }
-                        await Task.Delay(150, ct);
+                        await Task.Delay(200, ct);
                     }
                 }
                 catch (TaskCanceledException) { /* Uscita pulita */ }
@@ -250,7 +263,7 @@ namespace plugins.eliminator
                 totalBytesSaved += bytesSavedList[i];
             }
             // ---
-            ConsolePlus.WriteHr(25);            
+            ConsolePlus.WriteHr(25);
             ConsolePlus.Write($"[Cyan]#[/] Operazione Conclusa.");
             ConsolePlus.Write($"[Cyan]*[/] File cancellati  : {totalDropped}");
             ConsolePlus.Write($"[Cyan]*[/] Spazio coinvolto : {Formatter.Bytes(totalBytesSaved)}");
