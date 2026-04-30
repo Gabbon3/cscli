@@ -11,26 +11,26 @@ namespace plugins.count
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            // 1. Il parsing magico in una riga
+            // il parsing magico in una riga
             var settings = ParseSettings<CountSettings>(args);
 
-            // 2. Gestione Help o argomenti mancanti
+            // gestione Help o argomenti mancanti
             if (args.Length < 1 || args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
                 Help();
                 return;
             }
 
-            // 3. Setup del percorso root
+            // setup del percorso root
             string root = settings.TargetPath == "." ? Directory.GetCurrentDirectory() : settings.TargetPath;
 
             if (!Directory.Exists(root))
             {
-                PrintError($"Il percorso \"{root}\" non esiste"); // Assumo tu abbia un PrintError nella classe base o altrove
+                PrintError($"Il percorso \"{root}\" non esiste");
                 return;
             }
 
-            // 4. Creazione del filtro usando l'oggetto strongly-typed
+            // creazione del filtro
             var filterOpts = new FileFilterFactory.FilterOptions(
                 Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,

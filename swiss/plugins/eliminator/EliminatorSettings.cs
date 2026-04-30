@@ -21,7 +21,7 @@ namespace plugins.eliminator
         [Option("ignore-case|i", "Rende la ricerca case-insensitive")]
         public bool IgnoreCase { get; set; }
 
-        [Option("drop-instant|d", "Se attivo cancella subito appena lo trova (ottimo in percorsi di rete)")]
+        [Option("drop-instant|di", "Se attivo cancella subito appena lo trova (ottimo in percorsi di rete)")]
         public bool DropInstant { get; set; }
 
         // --- OPZIONI CON VALORE ---

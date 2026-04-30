@@ -115,6 +115,29 @@ namespace plugins.eliminator
             DriveRoot = Path.GetPathRoot(Path.GetFullPath(targetPath)) ?? "C:\\";
             GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
 
+            try
+            {
+                if (!dropInstant)
+                {
+                    Directory.CreateDirectory(GlobalTrashPath);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                PrintError($"Non è possibile creare la cartella '{GlobalTrashPath}', non si dispone dei permessi necessari");
+                return;
+            }
+            catch (IOException)
+            {
+                PrintError($"Errore I/O sul disco, non è stato possibile creare '{GlobalTrashPath}'");
+                return;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Non è stato possibile creare la cartella '{GlobalTrashPath}': {ex.Message}");
+                return;
+            }
+
             var workers = new Task[threadNumber];
             // sono tutti inizializzati gia a 0
             var droppedFilesCountList = new int[threadNumber];
@@ -129,10 +152,13 @@ namespace plugins.eliminator
                     int batchId = 0;
                     // cartella di lavoro del worker
                     string workerRoot = Path.Combine(GlobalTrashPath, workerId.ToString());
-                    Directory.CreateDirectory(workerRoot);
-                    // cartella di batch corrente
                     string currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
-                    Directory.CreateDirectory(currentBatchPath);
+                    if (!dropInstant)
+                    {
+                        Directory.CreateDirectory(workerRoot);
+                        // cartella di batch corrente
+                        Directory.CreateDirectory(currentBatchPath);
+                    }
                     // counter files cancellati da questo worker
                     int filesDroppedCounter = 0;
 
@@ -155,15 +181,8 @@ namespace plugins.eliminator
                                 else
                                 {
                                     string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{filesDroppedCounter}.tmp";
-                                    if (item.IsDirectory)
-                                    {
-                                        Directory.Move(item.GetFullPath(), destPath);
-                                    }
-                                    else
-                                    {
-                                        bytesSavedList[workerId] += item.Length;
-                                        File.Move(item.GetFullPath(), destPath);
-                                    }
+                                    bytesSavedList[workerId] += item.Length;
+                                    File.Move(item.GetFullPath(), destPath);
                                 }
                                 // ogni 4096 elementi cancello la cartella == a n % 4096 == 0
                                 if ((filesDroppedCounter & 4095) == 0)
@@ -205,19 +224,32 @@ namespace plugins.eliminator
             {
                 if (isDebug) return;
 
-                for (int i = 0; i < threadNumber; i++) Console.WriteLine();
+                // Aggiungiamo 2 righe extra per le statistiche globali
+                int uiLines = threadNumber + 2;
+                for (int i = 0; i < uiLines; i++) Console.WriteLine();
+
                 int consoleWidth = 80;
                 try { consoleWidth = Console.WindowWidth; } catch { }
+
+                // Variabili per il calcolo della velocità
+                long lastTotalDropped = 0;
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
                 try
                 {
                     while (isProcessing && !ct.IsCancellationRequested)
                     {
-                        try { Console.SetCursorPosition(0, Console.CursorTop - threadNumber); } catch { }
+                        // Salto indietro del numero totale di righe (thread + 2 stat)
+                        try { Console.SetCursorPosition(0, Math.Max(0, Console.CursorTop - uiLines)); } catch { }
 
+                        long currentTotalDropped = 0; // Sommatore per questo frame
+
+                        // 1. Stampa le righe dei singoli worker
                         for (int i = 0; i < threadNumber; i++)
                         {
                             int totalDropped = droppedFilesCountList[i];
+                            currentTotalDropped += totalDropped; // Accumulo il totale globale
+
                             int currentBatch = totalDropped / 4096;
                             int currentProgress = totalDropped % 4096;
 
@@ -228,21 +260,44 @@ namespace plugins.eliminator
                             string batchNum = currentBatch.ToString().PadLeft(3);
                             string dropStr = totalDropped.ToString().PadLeft(7);
 
-                            // FIX: Usiamo le parentesi tonde (B-  0) per non far impazzire il parser ConsolePlus
                             string coloredLine = $"[Yellow]{threadStr}[/] [DarkGray](B:[/][White]{batchNum}[/][DarkGray])[/] [Cyan]{dropStr}[/] [DarkGray]|[/][Green]{bar}[/][DarkGray]|[/]";
 
-                            // La lunghezza visibile ora è esattamente 63 caratteri (i tag spariscono)
                             int visibleLength = 63;
                             string padding = new string(' ', Math.Max(0, consoleWidth - 1 - visibleLength));
 
-                            // newLine: true ora funzionerà perfettamente senza creare scalette
                             ConsolePlus.Write(coloredLine + padding, newLine: true);
                         }
+
+                        // 2. Calcolo della velocità
+                        double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
+                        double filesPerSecond = 0;
+
+                        // Evitiamo divisioni per zero nel caso di esecuzioni fulminee
+                        if (elapsedSeconds > 0)
+                        {
+                            filesPerSecond = (currentTotalDropped - lastTotalDropped) / elapsedSeconds;
+                        }
+
+                        // Resetto i contatori per il prossimo giro
+                        lastTotalDropped = currentTotalDropped;
+                        stopwatch.Restart();
+
+                        // 3. Formattazione e stampa delle nuove statistiche
+                        // Usiamo :N0 per mettere il separatore delle migliaia (es. 1.234)
+                        string statLine1 = $"[Magenta]>[/] Totale Eliminati: {currentTotalDropped:N0}";
+                        string statLine2 = $"[Magenta]>[/] Velocità Attuale: {filesPerSecond:N0} file/s";
+
+                        // Consideriamo una lunghezza visibile approssimativa di 40 caratteri per i pad
+                        string statPadding = new(' ', Math.Max(0, consoleWidth - 1 - 45));
+
+                        ConsolePlus.Write(statLine1 + statPadding, newLine: true);
+                        ConsolePlus.Write(statLine2 + statPadding, newLine: true);
+
                         await Task.Delay(200, ct);
                     }
                 }
                 catch (TaskCanceledException) { /* Uscita pulita */ }
-            });
+            }, ct);
             // UI end
 
             await Task.WhenAll(workers);
