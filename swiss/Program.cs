@@ -13,8 +13,8 @@ using plugins.grep;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.9.3";
-const string versionDescription = "Bug Fix Find e Grep";
+const string version = "1.9.4";
+const string versionDescription = "Refactoring Eliminator, Grep, Find";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
