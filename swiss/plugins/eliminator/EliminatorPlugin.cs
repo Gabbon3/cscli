@@ -14,7 +14,29 @@ namespace plugins.eliminator
 
         private string GlobalTrashPath = "";
         private string DriveRoot = "C:\\";
+        private EliminationState State = new();
 
+        // # Stato interno
+        /// <summary>
+        /// Contiene lo stato completo dell'operazione di eliminazione.
+        /// Include configurazioni, canali di comunicazione e contatori di progresso.
+        /// </summary>
+        private class EliminationState
+        {
+            public string TargetPath { get; set; } = "";
+            public bool IsDebug { get; set; }
+            public bool IsRecursive { get; set; }
+            public bool DropInstant { get; set; }
+            public int ThreadNumber { get; set; }
+            public FileSystemFilter? FileFilter { get; set; }
+
+            public Channel<StackFileInfo>? WorkChannel { get; set; }
+            public int[] DroppedFilesCountList { get; set; } = [];
+            public long[] BytesSavedList { get; set; } = [];
+            public bool IsProcessing { get; set; } = true;
+        }
+
+        // # Esecuzione Principale
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
             var settings = ParseSettings<EliminatorSettings>(args);
@@ -25,16 +47,64 @@ namespace plugins.eliminator
                 return;
             }
 
-            // PARSING
-            string? targetPath = ParsePath(args[0]);
-            if (string.IsNullOrEmpty(targetPath)) return;
+            State = new EliminationState();
 
-            // flag booleani
-            bool isDebug = settings.Debug;
-            bool isRecursive = settings.Recursive;
-            bool dropInstant = settings.DropInstant;
-            int threadNumber = settings.Threads ?? Environment.ProcessorCount;
-            // filtri opzioni
+            // 1. parsing e validazione delle settings
+            if (!ParseAndValidateSettings(settings))
+            {
+                return;
+            }
+
+            // 2. inizializzazione del percorso di trashing temporaneo
+            if (!InitializeTrashPath())
+            {
+                return;
+            }
+
+            ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(State.IsDebug ? "(DEBUG)" : "")}");
+
+            // 3. inizializzo il task di producer
+            var producerTask = CreateProducerTask(ct);
+
+            // 4. inizializzo i task dei consumer (i workers veri e propri)
+            var workers = CreateWorkerTasks(ct);
+
+            // 5. inizializzo il task per il monitor UI
+            var monitorTask = CreateMonitorTask(ct);
+
+            // avvio e attendo tutti i workers
+            await Task.WhenAll(workers);
+            State.IsProcessing = false;
+            await monitorTask;
+            await producerTask;
+
+            // pulizia finale
+            CleanupTrashPath();
+
+            // 6. stampa statistiche finali
+            PrintFinalStatistics();
+        }
+
+        // # ---------------------------------- #
+        // Parsing e validazione Settings
+        // # ---------------------------------- #
+
+        /// <summary>
+        /// Analizza e valida i parametri di input.
+        /// Accede a: State (per popolarlo)
+        /// </summary>
+        private bool ParseAndValidateSettings(EliminatorSettings settings)
+        {
+            string? targetPath = ParsePath(settings.TargetPath);
+            if (string.IsNullOrEmpty(targetPath))
+                return false;
+
+            State.TargetPath = targetPath;
+            State.IsDebug = settings.Debug;
+            State.IsRecursive = settings.Recursive;
+            State.DropInstant = settings.DropInstant;
+            State.ThreadNumber = settings.Threads ?? Environment.ProcessorCount;
+
             var filterOpts = new FileFilterFactory.FilterOptions(
                 Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
@@ -43,23 +113,79 @@ namespace plugins.eliminator
                 ModifiedAfter: settings.Since
             );
 
-            var fileFilter = FileFilterFactory.CreateFilter(filterOpts);
+            State.FileFilter = FileFilterFactory.CreateFilter(filterOpts);
 
-            ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(isDebug ? "(DEBUG)" : "")}");
+            // Inizializza gli array per i contatori
+            State.DroppedFilesCountList = new int[State.ThreadNumber];
+            State.BytesSavedList = new long[State.ThreadNumber];
+
+            return true;
+        }
+
+        // # ---------------------------------- #
+        // Inizializzazione Percorso di Trash
+        // # ---------------------------------- #
+
+        /// <summary>
+        /// Inizializza il percorso del cestino globale e crea la struttura di directory.
+        /// Accede a: State.TargetPath, State.DropInstant
+        /// Popola: GlobalTrashPath, DriveRoot
+        /// </summary>
+        private bool InitializeTrashPath()
+        {
+            DriveRoot = Path.GetPathRoot(Path.GetFullPath(State.TargetPath)) ?? "C:\\";
+            GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
+
+            if (State.DropInstant)
+                return true;
+
+            try
+            {
+                Directory.CreateDirectory(GlobalTrashPath);
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                PrintError($"Non è possibile creare la cartella '{GlobalTrashPath}', non si dispone dei permessi necessari");
+                return false;
+            }
+            catch (IOException)
+            {
+                PrintError($"Errore I/O sul disco, non è stato possibile creare '{GlobalTrashPath}'");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Non è stato possibile creare la cartella '{GlobalTrashPath}': {ex.Message}");
+                return false;
+            }
+        }
+
+        // # ---------------------------------- #
+        // Creazione Task del Producer
+        // # ---------------------------------- #
+
+        /// <summary>
+        /// Crea il task che enumera i file dal file system e li invia al canale di lavoro.
+        /// Accede a: State.TargetPath, State.IsDebug, State.IsRecursive, State.FileFilter, State.WorkChannel
+        /// </summary>
+        private Task CreateProducerTask(CancellationToken ct)
+        {
+            State.WorkChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(50000)
+            {
+                SingleWriter = true,
+                SingleReader = false
+            });
 
             var enumOptions = new EnumerationOptions
             {
                 IgnoreInaccessible = true,
-                RecurseSubdirectories = isRecursive,
+                RecurseSubdirectories = State.IsRecursive,
                 BufferSize = 64 * 1024
             };
 
-            // # -------------- #
-            // #    PRODUCER    #
-            // # -------------- #
-
             IEnumerable<StackFileInfo> itemsToScan = new FileSystemEnumerable<StackFileInfo>(
-                targetPath,
+                State.TargetPath,
                 (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
                 enumOptions
             )
@@ -67,35 +193,29 @@ namespace plugins.eliminator
                 ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
                     if (entry.IsDirectory) return false;
-                    if (fileFilter != null)
+                    if (State.FileFilter != null)
                     {
-                        return fileFilter(ref entry);
+                        return State.FileFilter(ref entry);
                     }
                     return true;
                 }
             };
 
-            var workChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(50000)
-            {
-                SingleWriter = true,
-                SingleReader = false
-            });
-
-            var producerTask = Task.Run(async () =>
+            return Task.Run(async () =>
             {
                 try
                 {
                     foreach (var item in itemsToScan)
                     {
                         ct.ThrowIfCancellationRequested();
-                        if (isDebug)
+                        if (State.IsDebug)
                         {
                             ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
                             item.Dispose();
                         }
                         else
                         {
-                            await workChannel.Writer.WriteAsync(item, ct);
+                            await State.WorkChannel.Writer.WriteAsync(item, ct);
                         }
                     }
                 }
@@ -103,191 +223,174 @@ namespace plugins.eliminator
                 catch (Exception ex) { PrintError($"\n[Errore I/O]: {ex.Message}"); }
                 finally
                 {
-                    workChannel.Writer.Complete();
+                    State.WorkChannel.Writer.Complete();
                 }
             }, ct);
+        }
 
-            // # -------------- #
-            // #    CONSUMER    #
-            // # -------------- #
+        // # ---------------------------------- #
+        // Creazione dei Task[] dei Workers
+        // # ---------------------------------- #
 
-            // CONSUMER
-            DriveRoot = Path.GetPathRoot(Path.GetFullPath(targetPath)) ?? "C:\\";
-            GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
+        /// <summary>
+        /// Crea i task worker che consumano i file dal canale e li eliminano/archiviano.
+        /// Accede a: State.ThreadNumber, State.DropInstant, State.DroppedFilesCountList, 
+        ///           State.BytesSavedList, State.WorkChannel, GlobalTrashPath
+        /// </summary>
+        private Task[] CreateWorkerTasks(CancellationToken ct)
+        {
+            var workers = new Task[State.ThreadNumber];
 
-            try
-            {
-                if (!dropInstant)
-                {
-                    Directory.CreateDirectory(GlobalTrashPath);
-                }
-            }
-            catch (UnauthorizedAccessException)
-            {
-                PrintError($"Non è possibile creare la cartella '{GlobalTrashPath}', non si dispone dei permessi necessari");
-                return;
-            }
-            catch (IOException)
-            {
-                PrintError($"Errore I/O sul disco, non è stato possibile creare '{GlobalTrashPath}'");
-                return;
-            }
-            catch (Exception ex)
-            {
-                PrintError($"Non è stato possibile creare la cartella '{GlobalTrashPath}': {ex.Message}");
-                return;
-            }
-
-            var workers = new Task[threadNumber];
-            // sono tutti inizializzati gia a 0
-            var droppedFilesCountList = new int[threadNumber];
-            var bytesSavedList = new long[threadNumber];
-
-            for (int i = 0; i < threadNumber; i++)
+            for (int i = 0; i < State.ThreadNumber; i++)
             {
                 int workerId = i;
                 workers[i] = Task.Run(async () =>
                 {
                     List<Task> backgroundWorkerDrops = [];
                     int batchId = 0;
-                    // cartella di lavoro del worker
                     string workerRoot = Path.Combine(GlobalTrashPath, workerId.ToString());
                     string currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
-                    if (!dropInstant)
+
+                    if (!State.DropInstant)
                     {
                         Directory.CreateDirectory(workerRoot);
-                        // cartella di batch corrente
                         Directory.CreateDirectory(currentBatchPath);
                     }
-                    // counter files cancellati da questo worker
+
                     int filesDroppedCounter = 0;
 
                     try
                     {
-                        await foreach (var item in workChannel.Reader.ReadAllAsync())
+                        await foreach (var item in State.WorkChannel!.Reader.ReadAllAsync())
                         {
                             try
                             {
                                 filesDroppedCounter++;
-                                droppedFilesCountList[workerId] = filesDroppedCounter;
-                                // Se si decide di cancellare subito
-                                if (dropInstant)
+                                State.DroppedFilesCountList[workerId] = filesDroppedCounter;
+
+                                if (State.DropInstant)
                                 {
-                                    bytesSavedList[workerId] += item.Length;
+                                    State.BytesSavedList[workerId] += item.Length;
                                     NativeIO.DeleteFile(item.GetFullPath());
-                                    continue;
                                 }
-                                // altrimenti
                                 else
                                 {
                                     string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{filesDroppedCounter}.tmp";
-                                    bytesSavedList[workerId] += item.Length;
+                                    State.BytesSavedList[workerId] += item.Length;
                                     File.Move(item.GetFullPath(), destPath);
                                 }
-                                // ogni 4096 elementi cancello la cartella == a n % 4096 == 0
+
+                                // Ogni 4096 elementi, elimina il batch corrente
+                                // solo se non elimino subito i file
                                 if ((filesDroppedCounter & 4095) == 0)
                                 {
-                                    string folderToDrop = currentBatchPath;
-                                    backgroundWorkerDrops.Add(Task.Run(() =>
-                                    {
-                                        try { Directory.Delete(folderToDrop, true); } catch { }
-                                    }));
                                     batchId++;
-                                    currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
-                                    Directory.CreateDirectory(currentBatchPath);
-                                    // controllo se è stato lanciato il ct
+                                    // gestisco le cartelle di batch solo se non sto eliminando direttamente i file
+                                    if (!State.DropInstant)
+                                    {
+                                        string folderToDrop = currentBatchPath;
+                                        backgroundWorkerDrops.Add(Task.Run(() =>
+                                        {
+                                            try { Directory.Delete(folderToDrop, true); }
+                                            catch { }
+                                        }));
+
+                                        currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
+                                        Directory.CreateDirectory(currentBatchPath);
+                                    }
                                 }
                                 ct.ThrowIfCancellationRequested();
                             }
                             finally
                             {
-                                // restituisco ArrayPool
                                 item.Dispose();
                             }
                         }
                     }
                     finally
                     {
-                        // attendo tutte le cancellazioni e poi elimino tutto
                         await Task.WhenAll(backgroundWorkerDrops);
-                        if (Directory.Exists(workerRoot))
+                        if (!State.DropInstant && Directory.Exists(workerRoot))
                         {
-                            try { Directory.Delete(workerRoot, true); } catch { }
+                            try { Directory.Delete(workerRoot, true); }
+                            catch { }
                         }
                     }
-                });
+                }, ct);
             }
 
-            // UI monitor
-            bool isProcessing = true;
-            var monitorTask = Task.Run(async () =>
-            {
-                if (isDebug) return;
+            return workers;
+        }
 
-                // Aggiungiamo 2 righe extra per le statistiche globali
-                int uiLines = threadNumber + 2;
-                for (int i = 0; i < uiLines; i++) Console.WriteLine();
+        // # ---------------------------------- #
+        // Creazione del Monitor UI
+        // # ---------------------------------- #
+
+        /// <summary>
+        /// Crea il task che monitora e visualizza il progresso in tempo reale.
+        /// Accede a: State.ThreadNumber, State.IsDebug, State.DroppedFilesCountList, 
+        ///           State.IsProcessing
+        /// </summary>
+        private Task CreateMonitorTask(CancellationToken ct)
+        {
+            return Task.Run(async () =>
+            {
+                if (State.IsDebug) return;
+
+                int uiLines = State.ThreadNumber + 2;
+                for (int i = 0; i < uiLines; i++)
+                    Console.WriteLine();
 
                 int consoleWidth = 80;
-                try { consoleWidth = Console.WindowWidth; } catch { }
+                try { consoleWidth = Console.WindowWidth; }
+                catch { }
 
-                // Variabili per il calcolo della velocità
                 long lastTotalDropped = 0;
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
                 try
                 {
-                    while (isProcessing && !ct.IsCancellationRequested)
+                    while (State.IsProcessing && !ct.IsCancellationRequested)
                     {
-                        // Salto indietro del numero totale di righe (thread + 2 stat)
-                        try { Console.SetCursorPosition(0, Math.Max(0, Console.CursorTop - uiLines)); } catch { }
+                        try { Console.SetCursorPosition(0, Math.Max(0, Console.CursorTop - uiLines)); }
+                        catch { }
 
-                        long currentTotalDropped = 0; // Sommatore per questo frame
+                        long currentTotalDropped = 0;
 
-                        // 1. Stampa le righe dei singoli worker
-                        for (int i = 0; i < threadNumber; i++)
+                        // Stampa righe dei singoli worker
+                        for (int i = 0; i < State.ThreadNumber; i++)
                         {
-                            int totalDropped = droppedFilesCountList[i];
-                            currentTotalDropped += totalDropped; // Accumulo il totale globale
+                            int totalDropped = State.DroppedFilesCountList[i];
+                            currentTotalDropped += totalDropped;
 
                             int currentBatch = totalDropped / 4096;
                             int currentProgress = totalDropped % 4096;
-
                             int dashesCount = currentProgress / 102;
-                            string bar = new string('-', dashesCount).PadRight(40, ' ');
 
+                            string bar = new string('-', dashesCount).PadRight(40, ' ');
                             string threadStr = $"T-{i:D2}";
                             string batchNum = currentBatch.ToString().PadLeft(3);
                             string dropStr = totalDropped.ToString().PadLeft(7);
 
                             string coloredLine = $"[Yellow]{threadStr}[/] [DarkGray](B:[/][White]{batchNum}[/][DarkGray])[/] [Cyan]{dropStr}[/] [DarkGray]|[/][Green]{bar}[/][DarkGray]|[/]";
-
                             int visibleLength = 63;
                             string padding = new string(' ', Math.Max(0, consoleWidth - 1 - visibleLength));
 
                             ConsolePlus.Write(coloredLine + padding, newLine: true);
                         }
 
-                        // 2. Calcolo della velocità
+                        // Calcolo della velocità
                         double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
-                        double filesPerSecond = 0;
+                        double filesPerSecond = elapsedSeconds > 0
+                            ? (currentTotalDropped - lastTotalDropped) / elapsedSeconds
+                            : 0;
 
-                        // Evitiamo divisioni per zero nel caso di esecuzioni fulminee
-                        if (elapsedSeconds > 0)
-                        {
-                            filesPerSecond = (currentTotalDropped - lastTotalDropped) / elapsedSeconds;
-                        }
-
-                        // Resetto i contatori per il prossimo giro
                         lastTotalDropped = currentTotalDropped;
                         stopwatch.Restart();
 
-                        // 3. Formattazione e stampa delle nuove statistiche
-                        // Usiamo :N0 per mettere il separatore delle migliaia (es. 1.234)
-                        string statLine1 = $"[Magenta]>[/] Totale Eliminati: {currentTotalDropped:N0}";
-                        string statLine2 = $"[Magenta]>[/] Velocità Attuale: {filesPerSecond:N0} file/s";
-
-                        // Consideriamo una lunghezza visibile approssimativa di 40 caratteri per i pad
+                        // Stampa statistiche globali
+                        string statLine1 = $"[Magenta]>[/] Totale Eliminati: [Magenta]{currentTotalDropped:N0}[/]";
+                        string statLine2 = $"[Magenta]>[/] Velocità Attuale: [Green]{filesPerSecond:N0}[/] file/s";
                         string statPadding = new(' ', Math.Max(0, consoleWidth - 1 - 45));
 
                         ConsolePlus.Write(statLine1 + statPadding, newLine: true);
@@ -296,33 +399,51 @@ namespace plugins.eliminator
                         await Task.Delay(200, ct);
                     }
                 }
-                catch (TaskCanceledException) { /* Uscita pulita */ }
+                catch (TaskCanceledException) { }
             }, ct);
-            // UI end
+        }
 
-            await Task.WhenAll(workers);
-            isProcessing = false; // Segnala alla UI di fermarsi
-            await monitorTask;
-            await producerTask;
+        // # ---------------------------------- #
+        // Stampa delle statistiche finali
+        // # ---------------------------------- #
 
-            if (Directory.Exists(GlobalTrashPath))
-            {
-                try { Directory.Delete(GlobalTrashPath, true); } catch { }
-            }
-            // ---
+        /// <summary>
+        /// Calcola e stampa le statistiche finali dell'operazione.
+        /// Accede a: State.ThreadNumber, State.DroppedFilesCountList, State.BytesSavedList
+        /// </summary>
+        private void PrintFinalStatistics()
+        {
             long totalDropped = 0;
             long totalBytesSaved = 0;
-            for (int i = 0; i < threadNumber; i++)
+
+            for (int i = 0; i < State.ThreadNumber; i++)
             {
-                totalDropped += droppedFilesCountList[i];
-                totalBytesSaved += bytesSavedList[i];
+                totalDropped += State.DroppedFilesCountList[i];
+                totalBytesSaved += State.BytesSavedList[i];
             }
-            // ---
+
             ConsolePlus.WriteHr(25);
             ConsolePlus.Write($"[Cyan]#[/] Operazione Conclusa.");
             ConsolePlus.Write($"[Cyan]*[/] File cancellati  : {totalDropped}");
             ConsolePlus.Write($"[Cyan]*[/] Spazio coinvolto : {Formatter.Bytes(totalBytesSaved)}");
             ConsolePlus.WriteHr(25);
+        }
+
+        // # ---------------------------------- #
+        // Metodi secondari di Help
+        // # ---------------------------------- #
+
+        /// <summary>
+        /// Elimina la cartella del cestino temporaneo.
+        /// Dipende da: GlobalTrashPath
+        /// </summary>
+        private void CleanupTrashPath()
+        {
+            if (Directory.Exists(GlobalTrashPath))
+            {
+                try { Directory.Delete(GlobalTrashPath, true); }
+                catch { }
+            }
         }
 
         public override void Help()

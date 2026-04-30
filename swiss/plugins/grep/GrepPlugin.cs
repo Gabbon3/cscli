@@ -12,27 +12,41 @@ namespace plugins.grep
     class GrepPlugin : Plugin
     {
         public override string Name => "grep";
-        public override string Description => "Ricerca stringhe multiple con AhoCorasick (limitato ASCII - lavora con i byte grezzi";
-        // Lunghezza del pattern di ricerca piu lungo per gestire overlap
+        public override string Description => "Ricerca stringhe multiple con AhoCorasick (limitato ASCII - lavora con i byte grezzi)";
+
+        // # Stato condiviso tra i metodi
+        private GrepState State = new();
+
+        // # Attributi di classe (non dipendono dallo stato)
         private int LongestPattern = 0;
-        // Lunghezza di tutti i pattern
         private int[] PatternLengths = [];
         private bool IgnoreCase = false;
-        // motore di ricerca di grep (usato per ricerca di piu parole insieme)
-        AhoCorasick? AhoEngine;
-        // # ------------------------------- #
-        // # Cartelle da ignorare di default #
-        // # ------------------------------- #
+        private AhoCorasick? AhoEngine;
+        private FastPrinter _fastPrinter = new();
+
         private static readonly HashSet<string> DefaultExcludeDirs = new(StringComparer.OrdinalIgnoreCase)
         {
             "node_modules", ".git", ".svn", ".hg",
-            "bin", "obj",                           // .NET
-            ".vs", ".idea", ".vscode",              // IDE
-            "__pycache__", ".pytest_cache",         // Python
-            "dist", "build", ".next", ".nuxt",      // frontend build
-            "vendor",                               // Go / PHP
-            ".cargo",                               // Rust
+            "bin", "obj",
+            ".vs", ".idea", ".vscode",
+            "__pycache__", ".pytest_cache",
+            "dist", "build", ".next", ".nuxt",
+            "vendor",
+            ".cargo",
         };
+
+        // # Stato interno
+        private class GrepState
+        {
+            public string Root = string.Empty;
+            public string[] WordsToSearch = [];
+            public ReadOnlyMemory<byte>[] PatternList = [];
+            public HashSet<string> ExcludeDirs = new(StringComparer.OrdinalIgnoreCase);
+            public List<string> IncludeGlobs = [];
+            public Channel<string> FilesChannel = Channel.CreateBounded<string>(1);
+        }
+
+        // # Handler (invariato)
         private readonly struct AhoMatchHandler(string path, byte[] buffer, int currentDataLength, int chunkStartLine, int[] patternLengths, FastPrinter printer) : IMatchHandler
         {
             private readonly byte[] _buffer = buffer;
@@ -50,10 +64,13 @@ namespace plugins.grep
                 _printer.TryPost($"[Green]#[/] [DarkGray]{Path.GetDirectoryName(path)}{Path.DirectorySeparatorChar}[/][Cyan]{Path.GetFileName(path)}[/]\n[Green]# [Yellow]{lineNumber}:[/] {contextStr}\n[DarkGray]*\n*[/]");
             }
         }
-        private FastPrinter _fastPrinter = new();
 
+        // # ------------------------------ #
+        // RunAsync — diagramma di flusso
+        // # ------------------------------ #
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
+            // 1. ottengo i valori di settings
             var settings = ParseSettings<GrepSettings>(args);
             if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath) || string.IsNullOrEmpty(settings.Pattern))
             {
@@ -61,88 +78,186 @@ namespace plugins.grep
                 return;
             }
 
-            string root = ParsePath(settings.TargetPath, true)!;
-            string pattern = settings.Pattern;
+            State = new GrepState();
+            // 2. valido e parsifico le settings
+            if (!ParseAndValidateSettings(settings)) return;
+            // 3. costruisco la lista dei pattern da ricercare con AhoCorasick (split su '|')
+            BuildPatternList(settings.Pattern);
+            // 4. configuro le cartelle da escludere/includere nella ricerca
+            ConfigureDirectoryFilters(settings);
+            // 5. configuro i glob pattern dei file su cui effettuare la ricerca
+            ConfigureGlobFilters(settings);
+            // 6. preparo AhoCorasick e il channel del producer
+            InitializeEngine();
+            ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca...\n[DarkGray]*\n*[/]");
+            // 7. avvio il task per il print a console multithread
+            _fastPrinter.Run(ct);
+            // 8. avvio i task di producer e consumers
+            var producerTask = RunProducerAsync(ct);
+            var workerTasks = StartWorkers(ct);
+            // 9. attendo il termine di tutti i worker
+            await producerTask;
+            await Task.WhenAll(workerTasks);
+            await _fastPrinter.Complete();
+            // 10. termine
+            ConsolePlus.Write($"[Cyan]#[/] Ricerca completata");
+        }
 
-            if (pattern.Length == 0)
+        // # ------------------------------ #
+        // Metodi principali
+        // # ------------------------------ #
+
+        /// <summary>
+        /// Valida il percorso root e il pattern; popola State.Root.
+        /// Accede a: State.Root, settings.TargetPath, settings.IgnoreCase
+        /// </summary>
+        private bool ParseAndValidateSettings(GrepSettings settings)
+        {
+            string? root = ParsePath(settings.TargetPath, true);
+            if (root is null)
+            {
+                PrintError("Il percorso specificato non è valido.");
+                return false;
+            }
+
+            if (settings.Pattern.Length == 0)
             {
                 PrintError("Il pattern di ricerca non può essere vuoto.");
-                return;
+                return false;
             }
-            // preparo il pattern per AhoChorasick
-            string[] wordsToSearch = pattern.Split('|', StringSplitOptions.RemoveEmptyEntries);
-            LongestPattern = wordsToSearch[0].Length;
-            // # --------------------- #
-            // # Parsing delle opzioni #
-            // # --------------------- #
+
+            State.Root = root;
             IgnoreCase = settings.IgnoreCase;
-            var patternList = new ReadOnlyMemory<byte>[wordsToSearch.Length];
-            PatternLengths = new int[wordsToSearch.Length]; // Inizializza l'array
+            return true;
+        }
 
-            for (int i = 0; i < wordsToSearch.Length; i++)
+        /// <summary>
+        /// Splitta il pattern su '|', calcola LongestPattern, PatternLengths e State.PatternList.
+        /// Accede a: State.WordsToSearch, State.PatternList, LongestPattern, PatternLengths, IgnoreCase
+        /// </summary>
+        private void BuildPatternList(string pattern)
+        {
+            State.WordsToSearch = pattern.Split('|', StringSplitOptions.RemoveEmptyEntries);
+            State.PatternList = new ReadOnlyMemory<byte>[State.WordsToSearch.Length];
+            PatternLengths = new int[State.WordsToSearch.Length];
+            LongestPattern = State.WordsToSearch[0].Length;
+
+            for (int i = 0; i < State.WordsToSearch.Length; i++)
             {
-                PatternLengths[i] = wordsToSearch[i].Length; // Salva la lunghezza
-                if (wordsToSearch[i].Length > LongestPattern) LongestPattern = wordsToSearch[i].Length;
-                var wordPatternBytes = Encoding.UTF8.GetBytes(wordsToSearch[i]);
-                if (IgnoreCase)
-                {
-                    SpanExtensions.ToLowerAsciiSafe(wordPatternBytes);
-                }
-                patternList[i] = wordPatternBytes;
+                PatternLengths[i] = State.WordsToSearch[i].Length;
+                if (State.WordsToSearch[i].Length > LongestPattern)
+                    LongestPattern = State.WordsToSearch[i].Length;
+
+                var wordBytes = Encoding.UTF8.GetBytes(State.WordsToSearch[i]);
+                if (IgnoreCase) SpanExtensions.ToLowerAsciiSafe(wordBytes);
+                State.PatternList[i] = wordBytes;
             }
+        }
 
-            // cartelle da escludere
-            var excludeDirs = new HashSet<string>(DefaultExcludeDirs, StringComparer.OrdinalIgnoreCase);
-            var excludeDirsOptions = settings.ExcludeDirs;
-            if (!string.IsNullOrEmpty(excludeDirsOptions))
-            {
-                foreach (var dir in excludeDirsOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    excludeDirs.Add(dir.Trim());
-                }
-            }
+        /// <summary>
+        /// Costruisce State.ExcludeDirs partendo da DefaultExcludeDirs,
+        /// aggiungendo le escluse e rimuovendo le incluse da settings.
+        /// Accede a: State.ExcludeDirs, settings.ExcludeDirs, settings.IncludeDirs
+        /// </summary>
+        private void ConfigureDirectoryFilters(GrepSettings settings)
+        {
+            State.ExcludeDirs = new HashSet<string>(DefaultExcludeDirs, StringComparer.OrdinalIgnoreCase);
 
-            // cartelle da includere rispetto a quelle di default
-            var includeDirsOptions = settings.IncludeDirs;
-            if (!string.IsNullOrEmpty(includeDirsOptions))
-            {
-                foreach (var dir in includeDirsOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    excludeDirs.Remove(dir.Trim());
-                }
-            }
+            if (!string.IsNullOrEmpty(settings.ExcludeDirs))
+                foreach (var dir in settings.ExcludeDirs.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    State.ExcludeDirs.Add(dir.Trim());
 
-            // pattern glob per escludere files
-            var includeGlobs = new List<string>();
-            var GlobOptions = settings.Glob;
-            if (!string.IsNullOrEmpty(GlobOptions))
-            {
-                foreach (var glob in GlobOptions.Split(',', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    includeGlobs.Add(glob.Trim());
-                }
-            }
+            if (!string.IsNullOrEmpty(settings.IncludeDirs))
+                foreach (var dir in settings.IncludeDirs.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    State.ExcludeDirs.Remove(dir.Trim());
+        }
 
-            ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca...\n[DarkGray]*\n*[/]");
+        /// <summary>
+        /// Popola State.IncludeGlobs dai glob specificati in settings.
+        /// Accede a: State.IncludeGlobs, settings.Glob
+        /// </summary>
+        private void ConfigureGlobFilters(GrepSettings settings)
+        {
+            State.IncludeGlobs = [];
+            if (!string.IsNullOrEmpty(settings.Glob))
+                foreach (var glob in settings.Glob.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    State.IncludeGlobs.Add(glob.Trim());
+        }
 
-            // inizializzo l'automa di AhoCorasick solo dopo aver validato tutto
-            AhoEngine = new AhoCorasick(patternList);
-
-            // # ---------------------- #
-            // # 1. Preparo il producer #
-            // # ---------------------- #
-            var filesChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000)
+        /// <summary>
+        /// Inizializza AhoEngine e State.FilesChannel.
+        /// Accede a: AhoEngine, State.PatternList, State.FilesChannel
+        /// </summary>
+        private void InitializeEngine()
+        {
+            AhoEngine = new AhoCorasick(State.PatternList);
+            State.FilesChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000)
             {
                 SingleWriter = true,
                 SingleReader = false
             });
+        }
 
-            // avvio il printer ad alte prestazioni sulla console
-            _fastPrinter.Run(ct);
+        /// <summary>
+        /// Enumera i file nel filesystem e li scrive su State.FilesChannel.
+        /// Accede a: State.Root, State.ExcludeDirs, State.IncludeGlobs, State.FilesChannel
+        /// </summary>
+        private async Task RunProducerAsync(CancellationToken ct)
+        {
+            var enumerationOptions = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                ReturnSpecialDirectories = false
+            };
 
-            // # --------------------- #
-            // # 2. Preparo gli operai #
-            // # --------------------- #
+            var enumerable = new FileSystemEnumerable<string>(
+                State.Root,
+                (ref FileSystemEntry entry) => entry.ToSpecifiedFullPath(),
+                enumerationOptions)
+            {
+                ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+                {
+                    if (entry.IsDirectory) return false;
+                    if (State.IncludeGlobs.Count == 0) return true;
+
+                    ReadOnlySpan<char> fileName = entry.FileName;
+                    foreach (var glob in State.IncludeGlobs)
+                        if (FileSystemName.MatchesSimpleExpression(glob, fileName, ignoreCase: true))
+                            return true;
+
+                    return false;
+                },
+                ShouldRecursePredicate = (ref FileSystemEntry entry) =>
+                {
+                    ReadOnlySpan<char> dirName = entry.FileName;
+                    foreach (var excluded in State.ExcludeDirs)
+                        if (dirName.Equals(excluded, StringComparison.OrdinalIgnoreCase))
+                            return false;
+                    return true;
+                }
+            };
+
+            try
+            {
+                foreach (var fileInfo in enumerable)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    await State.FilesChannel.Writer.WriteAsync(fileInfo, ct);
+                }
+            }
+            finally
+            {
+                State.FilesChannel.Writer.Complete();
+            }
+        }
+
+        /// <summary>
+        /// Avvia un task worker per ogni core disponibile e li restituisce.
+        /// Accede a: State.FilesChannel, AhoEngine, LongestPattern, PatternLengths, IgnoreCase, _fastPrinter
+        /// </summary>
+        private Task[] StartWorkers(CancellationToken ct)
+        {
             int threads = Environment.ProcessorCount;
             var workers = new Task[threads];
 
@@ -153,88 +268,22 @@ namespace plugins.grep
                     byte[] workerBuffer = new byte[65536];
                     byte[] lowerBuffer = IgnoreCase ? new byte[65536] : [];
 
-                    await foreach (var path in filesChannel.Reader.ReadAllAsync(ct))
-                    {
+                    await foreach (var path in State.FilesChannel.Reader.ReadAllAsync(ct))
                         ProcessFile(path, workerBuffer, lowerBuffer, LongestPattern);
-                    }
                 }, ct);
             }
 
-            // # --------------------------------- #
-            // # 3. Producer: FileSystemEnumerable #
-            // # --------------------------------- #
-            var enumerationOptions = new EnumerationOptions
-            {
-                RecurseSubdirectories = true,
-                IgnoreInaccessible = true,
-                ReturnSpecialDirectories = false
-            };
-
-            var enumerable = new FileSystemEnumerable<string>(
-                root,
-                (ref FileSystemEntry entry) => entry.ToSpecifiedFullPath(),
-                enumerationOptions)
-            {
-                // logica di esclusione dei file
-                ShouldIncludePredicate = (ref FileSystemEntry entry) =>
-                {
-                    if (entry.IsDirectory) return false;
-                    // se non ci sono filtri passo tutto
-                    if (includeGlobs.Count == 0) return true;
-
-                    ReadOnlySpan<char> fileName = entry.FileName;
-                    // per ogni regola di esclusione la verifico
-                    foreach (var glob in includeGlobs)
-                    {
-                        if (FileSystemName.MatchesSimpleExpression(glob, fileName, ignoreCase: true))
-                        {
-                            return true;
-                        }
-                    }
-                    // qui il file non ha superato nessun match
-                    return false;
-                },
-                // qui filtriamo le cartelle da includere nella ricorsione
-                ShouldRecursePredicate = (ref FileSystemEntry entry) =>
-                {
-                    ReadOnlySpan<char> dirName = entry.FileName; // qui file name => nome cartella
-                    foreach (var excluded in excludeDirs)
-                    {
-                        if (dirName.Equals(excluded, StringComparison.OrdinalIgnoreCase))
-                        {
-                            return false;
-                        }
-                    }
-                    return true;
-                }
-            };
-
-            try
-            {
-                foreach (var fileInfo in enumerable)
-                {
-                    if (ct.IsCancellationRequested) break;
-                    await filesChannel.Writer.WriteAsync(fileInfo, ct);
-                }
-            }
-            finally
-            {
-                filesChannel.Writer.Complete();
-            }
-
-            await Task.WhenAll(workers);
-            await _fastPrinter.Complete();
-
-            ConsolePlus.Write($"[Cyan]#[/] Ricerca completata");
+            return workers;
         }
 
+        // # ------------------------------ #
+        // Metodi di elaborazione (invariati nella logica)
+        // # ------------------------------ #
+
         /// <summary>
-        /// Processa un file andando a cercare il pattern definito all'inizio con AhoCorasick a blocchi di 64KB
+        /// Processa un file cercando il pattern con AhoCorasick a blocchi da 64 KB.
+        /// Accede a: AhoEngine, PatternLengths, IgnoreCase, _fastPrinter
         /// </summary>
-        /// <param name="path"></param>
-        /// <param name="buffer">Definito in precedenza: byte[] workerBuffer = new byte[65536];</param>
-        /// <param name="lowerBuffer"></param>
-        /// <param name="overlap"></param>
         private void ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap)
         {
             SafeFileHandle? handle = null;
@@ -258,7 +307,6 @@ namespace plugins.grep
                     int currentDataLength = bytesRead + leftover;
                     ReadOnlySpan<byte> dataSpan = buffer.AsSpan(0, currentDataLength);
 
-                    // controllo se si tratta di un file binario
                     if (isFirstChunk)
                     {
                         if (dataSpan.Contains((byte)0)) return;
@@ -278,13 +326,9 @@ namespace plugins.grep
                         searchSpan = dataSpan;
                     }
 
-                    // creo l'handler passando tutto il necessario
                     var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter);
-
-                    // inizio la ricerca con AhoCorasick e itero su tutti i byte
                     AhoEngine!.Search(searchSpan, ref handler);
 
-                    // gestione leftover
                     if (currentDataLength > overlap)
                     {
                         leftover = overlap;
@@ -295,10 +339,8 @@ namespace plugins.grep
                         leftover = currentDataLength;
                     }
 
-                    // conto il numero di righe presenti in questo blocco di ricerca
                     int consumedLength = currentDataLength - leftover;
                     totalLines += CountLines(dataSpan[..consumedLength]);
-
                     fileOffset += bytesRead;
                 }
             }
@@ -311,13 +353,8 @@ namespace plugins.grep
         }
 
         /// <summary>
-        /// Restituisce la stringa gia con i colori del match trovato
+        /// Restituisce la stringa con i colori applicati attorno al match trovato.
         /// </summary>
-        /// <param name="span"></param>
-        /// <param name="matchIndex"></param>
-        /// <param name="patternLength"></param>
-        /// <param name="maxContext"></param>
-        /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static string ExtractMatchContext(ReadOnlySpan<byte> span, int matchIndex, int patternLength, int maxContext = 50)
         {
@@ -340,50 +377,25 @@ namespace plugins.grep
             var exactMatch = span[matchIndex..endMatch];
             var exactRight = span[endMatch..actualEnd];
 
-            // +14 per i ... (6) e i tag colore (8)
             Span<char> buffer = stackalloc char[actualEnd - actualStart + 14];
             int pos = 0;
 
-            // prefisso
-            if (truncatedLeft)
-            {
-                "...".AsSpan().CopyTo(buffer[pos..]);
-                pos += 3;
-            }
+            if (truncatedLeft) { "...".AsSpan().CopyTo(buffer[pos..]); pos += 3; }
 
-            // decodifico sinistra
-            int leftChars = Encoding.UTF8.GetChars(exactLeft, buffer[pos..]);
-            pos += leftChars;
+            int leftChars = Encoding.UTF8.GetChars(exactLeft, buffer[pos..]); pos += leftChars;
+            "[Red]".AsSpan().CopyTo(buffer[pos..]); pos += 5;
+            int matchChars = Encoding.UTF8.GetChars(exactMatch, buffer[pos..]); pos += matchChars;
+            "[/]".AsSpan().CopyTo(buffer[pos..]); pos += 3;
+            int rightChars = Encoding.UTF8.GetChars(exactRight, buffer[pos..]); pos += rightChars;
 
-            // tag rosso e match
-            "[Red]".AsSpan().CopyTo(buffer[pos..]);
-            pos += 5;
-
-            int matchChars = Encoding.UTF8.GetChars(exactMatch, buffer[pos..]);
-            pos += matchChars;
-
-            "[/]".AsSpan().CopyTo(buffer[pos..]);
-            pos += 3;
-
-            // decodifico destra
-            int rightChars = Encoding.UTF8.GetChars(exactRight, buffer[pos..]);
-            pos += rightChars;
-
-            // suffisso
-            if (truncatedRight)
-            {
-                "...".AsSpan().CopyTo(buffer[pos..]);
-                pos += 3;
-            }
+            if (truncatedRight) { "...".AsSpan().CopyTo(buffer[pos..]); pos += 3; }
 
             return new string(buffer[..pos]);
         }
 
         /// <summary>
-        /// Restituisce il numero di riga del match
+        /// Conta il numero di newline presenti nello span (usato per il conteggio righe).
         /// </summary>
-        /// <param name="span"></param>
-        /// <returns></returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int CountLines(ReadOnlySpan<byte> span)
         {
@@ -397,9 +409,6 @@ namespace plugins.grep
             return count;
         }
 
-        public override void Help()
-        {
-            PrintHelp<GrepSettings>();
-        }
+        public override void Help() => PrintHelp<GrepSettings>();
     }
 }

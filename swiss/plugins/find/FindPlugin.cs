@@ -11,11 +11,24 @@ namespace plugins.find
         public override string Name => "find";
         public override string Description => "Ricerca di file tramite regex o stringhe fisse, con supporto classifiche (ranking)";
 
-        private PriorityQueue<StackFileInfo, long>? PriorityQueue;
-        // Delegate che deciderà cosa fare col file (Stampa o Inserimento in coda)
-        private Action<StackFileInfo>? _processItemStrategy;
-        // Delegate che calcolerà il punteggio al volo senza if
-        private Func<StackFileInfo, long>? _prioritySelector;
+        // # Stato condiviso tra i metodi
+        private FindState State = new();
+
+        // # Stato interno
+        private class FindState
+        {
+            public string Root = string.Empty;
+            public string? Pattern;
+            public bool Recurse = true;
+            public bool IsRanking = false;
+            public int MatchCount = 0;
+
+            public PriorityQueue<StackFileInfo, long>? PriorityQueue;
+            public Action<StackFileInfo>? ProcessItemStrategy;
+            public Func<StackFileInfo, long>? PrioritySelector;
+            public FinderOptions Config = new();
+            public FileSystemFilter? FileFilter;
+        }
 
         private struct FinderOptions
         {
@@ -26,10 +39,12 @@ namespace plugins.find
             public int Limit { get; set; }
         }
 
-        private FinderOptions FinderOptionsConfig;
-
+        // # ---------------------------------- #
+        // RunAsync — diagramma di flusso
+        // # ---------------------------------- #
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
+            // 1. ottengo i valori di settings
             var settings = ParseSettings<FindSettings>(args);
             if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
             {
@@ -37,116 +52,194 @@ namespace plugins.find
                 return;
             }
 
-            string root = ParsePath(settings.TargetPath, true)!;
-            string? pattern = ParseMatchPattern(settings.Pattern);
-            // default true
-            bool recurse = !settings.NoRecurseSubdirectories;
+            State = new FindState();
+            // 2. valido e parsifico le settings
+            if (!ParseAndValidateSettings(settings)) return;
+            // 3. configuro le opzioni per il ranking (se richiesto)
+            ConfigureRankingMode(settings);
+            // 4. costruisco il filtro per cercare i file (il motore vero del plugin)
+            if (!BuildFileFilter(settings)) return;
+            // 5. creo la configurazione del FastWalker
+            var walkerOptions = CreateWalkerOptions(settings);
+            // 6. avvio il processo principale, inizio la ricerca
+            await ProcessFilesAsync(walkerOptions, ct);
+            // 7. stampo la top n (se richiesta)
+            if (State.IsRanking) PrintRankingResults();
+            // 8. statistiche finali
+            PrintFinalSummary();
+        }
 
-            // RANKING
-            bool isRanking = settings.Oldest || settings.Newest || settings.Biggest || settings.Smallest;
-            if (isRanking)
+        // # ---------------------------------- #
+        // Metodi estratti
+        // # ---------------------------------- #
+
+        /// <summary>
+        /// Valida le impostazioni e popola root, pattern e recurse in State.
+        /// Accede a: State.Root, State.Pattern, State.Recurse
+        /// </summary>
+        private bool ParseAndValidateSettings(FindSettings settings)
+        {
+            string? root = ParsePath(settings.TargetPath, true);
+            if (root is null)
             {
-                PriorityQueue = new PriorityQueue<StackFileInfo, long>();
-                // --- LETTURA OPZIONI RANKING ---
-                FinderOptionsConfig.Oldest = settings.Oldest;
-                FinderOptionsConfig.Newest = settings.Newest;
-                FinderOptionsConfig.Biggest = settings.Biggest;
-                FinderOptionsConfig.Smallest = settings.Smallest;
-                FinderOptionsConfig.Limit = settings.Limit;
-                if (settings.Biggest) _prioritySelector = item => item.Length;
-                else if (settings.Smallest) _prioritySelector = item => -item.Length;
-                else if (settings.Oldest) _prioritySelector = item => -item.LastWriteTime.Ticks;
-                else if (settings.Newest) _prioritySelector = item => item.LastWriteTime.Ticks;
+                PrintError("Il percorso specificato non è valido.");
+                return false;
+            }
 
-                _processItemStrategy = RankItem;
+            State.Root = root;
+            State.Pattern = ParseMatchPattern(settings.Pattern);
+            State.Recurse = !settings.NoRecurseSubdirectories;
+            return true;
+        }
+
+        /// <summary>
+        /// Configura la modalità ranking se richiesta, inizializzando PriorityQueue e i delegate.
+        /// Accede a: State.IsRanking, State.PriorityQueue, State.Config, State.PrioritySelector, State.ProcessItemStrategy
+        /// </summary>
+        private void ConfigureRankingMode(FindSettings settings)
+        {
+            State.IsRanking = settings.Oldest || settings.Newest || settings.Biggest || settings.Smallest;
+
+            if (State.IsRanking)
+            {
+                State.PriorityQueue = new PriorityQueue<StackFileInfo, long>();
+                State.Config.Oldest = settings.Oldest;
+                State.Config.Newest = settings.Newest;
+                State.Config.Biggest = settings.Biggest;
+                State.Config.Smallest = settings.Smallest;
+                State.Config.Limit = settings.Limit;
+
+                if (settings.Biggest)
+                    State.PrioritySelector = item => item.Length;
+                else if (settings.Smallest)
+                    State.PrioritySelector = item => -item.Length;
+                else if (settings.Oldest)
+                    State.PrioritySelector = item => -item.LastWriteTime.Ticks;
+                else if (settings.Newest)
+                    State.PrioritySelector = item => item.LastWriteTime.Ticks;
+
+                State.ProcessItemStrategy = RankItem;
             }
             else
             {
-                _processItemStrategy = PrintSimpleMatch;
+                State.ProcessItemStrategy = PrintSimpleMatch;
             }
+        }
 
-            // FILTRI
+        /// <summary>
+        /// Crea il FileSystemFilter in base alle opzioni fornite.
+        /// Accede a: State.Pattern, State.FileFilter
+        /// </summary>
+        private bool BuildFileFilter(FindSettings settings)
+        {
             var filterOpts = new FileFilterFactory.FilterOptions(
-                Pattern: pattern,
+                Pattern: State.Pattern,
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
                 ModifiedBefore: settings.OlderThan,
                 ModifiedAfter: settings.Since
             );
 
-            FileSystemFilter? fileFilter;
             try
             {
-                fileFilter = FileFilterFactory.CreateFilter(filterOpts);
+                State.FileFilter = FileFilterFactory.CreateFilter(filterOpts);
+                return true;
             }
             catch (ArgumentException ex)
             {
                 PrintError("Il pattern fornito non è valido: " + ex.Message);
-                return;
+                return false;
             }
             catch (Exception ex)
             {
                 PrintError("Errore durante la creazione dei filtri per i file: " + ex.Message);
-                return;
+                return false;
             }
+        }
 
-            // FASTWALKER OPTIONS
-            var fastWalkerOptions = new FastWalkerOptions
+        /// <summary>
+        /// Crea le opzioni per FastWalker in base alle configurazioni in State.
+        /// Accede a: State.FileFilter, State.Recurse
+        /// </summary>
+        private FastWalkerOptions CreateWalkerOptions(FindSettings settings)
+        {
+            return new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
-                RecurseSubdirectories = recurse,
-                Filter = fileFilter,
+                RecurseSubdirectories = State.Recurse,
+                Filter = State.FileFilter,
                 BufferSize = 64 * 1024,
                 SingleReader = true,
                 ReturnDirectoriesInOutput = settings.Dirs
             };
+        }
 
-            // avvio il walker
+        /// <summary>
+        /// Avvia il walker, legge i file e li processa tramite la strategy configurata.
+        /// Accede a: State.Root, State.MatchCount, State.ProcessItemStrategy
+        /// </summary>
+        private async Task ProcessFilesAsync(FastWalkerOptions walkerOptions, CancellationToken ct)
+        {
             var walkerReader = FastWalker.Walk<StackFileInfo>(
-                root,
+                State.Root,
                 (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
-                fastWalkerOptions,
+                walkerOptions,
                 ct
             );
 
-            int matchCount = 0;
-
-            // leggo dal channel
             await foreach (var item in walkerReader.ReadAllAsync(ct))
             {
-                matchCount++;
-                _processItemStrategy!(item);
+                State.MatchCount++;
+                State.ProcessItemStrategy!(item);
             }
+        }
 
-            // se sto effettuando top n stampo i risultati finali
-            if (isRanking)
+        /// <summary>
+        /// Stampa i risultati della classifica estraendo gli elementi dalla PriorityQueue.
+        /// Accede a: State.PriorityQueue, State.Config, State.MatchCount
+        /// </summary>
+        private void PrintRankingResults()
+        {
+            ConsolePlus.Write($"\n[Yellow]Risultati classifica (Top {Math.Min(State.Config.Limit, State.MatchCount)}):[/]");
+
+            while (State.PriorityQueue!.Count > 0)
             {
-                ConsolePlus.Write($"\n[Yellow]Risultati classifica (Top {Math.Min(FinderOptionsConfig.Limit, matchCount)}):[/]");
-
-                while (PriorityQueue!.Count > 0)
+                var item = State.PriorityQueue.Dequeue();
+                try
                 {
-                    var item = PriorityQueue.Dequeue();
-                    try
-                    {
-                        string info = FinderOptionsConfig.Biggest || FinderOptionsConfig.Smallest
-                            ? $" ({Formatter.Bytes(item.Length)})"
-                            : $" ({item.LastWriteTime.ToLocalTime():yyyy-MM-dd HH:mm:ss})";
+                    string info = State.Config.Biggest || State.Config.Smallest
+                        ? $" ({Formatter.Bytes(item.Length)})"
+                        : $" ({item.LastWriteTime.ToLocalTime():yyyy-MM-dd HH:mm:ss})";
 
-                        ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/][Yellow]{info}[/]");
-                    }
-                    finally
-                    {
-                        item.Dispose(); // smaltisco dall'arraypool i file nella coda prioritaria
-                    }
+                    ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/][Yellow]{info}[/]");
+                }
+                finally
+                {
+                    item.Dispose();
                 }
             }
+        }
 
+        /// <summary>
+        /// Stampa il riepilogo finale con il conteggio degli elementi trovati.
+        /// Accede a: State.MatchCount
+        /// </summary>
+        private void PrintFinalSummary()
+        {
             ConsolePlus.WriteHr();
             ConsolePlus.Write($"[Cyan]#[/] Ricerca conclusa");
-            ConsolePlus.Write($"[Cyan]#[/] Elementi trovati: [Cyan]{matchCount}[/]");
+            ConsolePlus.Write($"[Cyan]#[/] Elementi trovati: [Cyan]{State.MatchCount}[/]");
             ConsolePlus.WriteHr();
         }
 
+        // # ---------------------------------- #
+        // Metodi di supporto (invariati nella logica)
+        // # ---------------------------------- #
+
+        /// <summary>
+        /// Stampa un match semplice (non-ranking) e dispose del StackFileInfo.
+        /// Accede a: nessun accesso a State
+        /// </summary>
         private void PrintSimpleMatch(StackFileInfo item)
         {
             if (item.IsDirectory)
@@ -160,18 +253,19 @@ namespace plugins.find
             item.Dispose();
         }
 
+        /// <summary>
+        /// Inserisce un item nella PriorityQueue mantenendo solo i top N elementi.
+        /// Accede a: State.PriorityQueue, State.PrioritySelector, State.Config.Limit
+        /// </summary>
         private void RankItem(StackFileInfo item)
         {
-            PriorityQueue!.Enqueue(item, _prioritySelector!(item));
-            if (PriorityQueue.Count > FinderOptionsConfig.Limit)
+            State.PriorityQueue!.Enqueue(item, State.PrioritySelector!(item));
+            if (State.PriorityQueue.Count > State.Config.Limit)
             {
-                PriorityQueue.Dequeue().Dispose();
+                State.PriorityQueue.Dequeue().Dispose();
             }
         }
 
-        public override void Help()
-        {
-            PrintHelp<FindSettings>();
-        }
+        public override void Help() => PrintHelp<FindSettings>();
     }
 }
