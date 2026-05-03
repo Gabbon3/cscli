@@ -6,6 +6,7 @@ using lib.console;
 using System.Runtime.CompilerServices;
 using lib.algorithm;
 using lib.utils;
+using System.Buffers;
 
 namespace plugins.grep
 {
@@ -23,6 +24,7 @@ namespace plugins.grep
         private bool IgnoreCase = false;
         private AhoCorasick? AhoEngine;
         private FastPrinter _fastPrinter = new();
+        private static readonly int MaxContextSize = 50;
 
         private static readonly HashSet<string> DefaultExcludeDirs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -46,7 +48,7 @@ namespace plugins.grep
             public Channel<string> FilesChannel = Channel.CreateBounded<string>(1);
         }
 
-        // # Handler (invariato)
+        // # Handler
         private readonly struct AhoMatchHandler(string path, byte[] buffer, int currentDataLength, int chunkStartLine, int[] patternLengths, FastPrinter printer) : IMatchHandler
         {
             private readonly byte[] _buffer = buffer;
@@ -57,11 +59,37 @@ namespace plugins.grep
 
             public void OnMatch(int startIndex, int endIndex, int patternIndex, int relativeLine)
             {
-                int patLen = _patternLengths[patternIndex];
+                int patternLength = _patternLengths[patternIndex];
                 ReadOnlySpan<byte> originalDataSpan = _buffer.AsSpan(0, _currentDataLength);
+                // affitto lo spazio per costruire la stringa di output
+                IMemoryOwner<char> memoryOwner = MemoryPool<char>.Shared.Rent(2048);
+                Span<char> outputSpan = memoryOwner.Memory.Span;
+                int matchLength = 0;
+
                 int lineNumber = _chunkStartLine + relativeLine;
-                string contextStr = ExtractMatchContext(originalDataSpan, startIndex, patLen, maxContext: 50);
-                _printer.TryPost($"[Green]#[/] [DarkGray]{Path.GetDirectoryName(path)}{Path.DirectorySeparatorChar}[/][Cyan]{Path.GetFileName(path)}[/]\n[Green]# [Yellow]{lineNumber}:[/] {contextStr}\n[DarkGray]*\n*[/]");
+
+                // header
+                "[Green]#[/] [DarkGray]".AsSpan().AppendTo(outputSpan, ref matchLength);
+                Path.GetDirectoryName(path).AsSpan().AppendTo(outputSpan, ref matchLength);
+                Path.DirectorySeparatorChar.AppendTo(outputSpan, ref matchLength);
+                "[Cyan]".AsSpan().AppendTo(outputSpan, ref matchLength);
+                Path.GetFileName(path).AsSpan().AppendTo(outputSpan, ref matchLength);
+                "[/]\n[Green]# [Yellow]".AsSpan().AppendTo(outputSpan, ref matchLength);
+                // TODO: rimuovere ToString -- numero di linea
+                lineNumber.ToString().AsSpan().AppendTo(outputSpan, ref matchLength);
+                ":[/] ".AsSpan().AppendTo(outputSpan, ref matchLength);
+                // estraggo il contesto del match
+                int len = ExtractMatchContext(
+                    originalDataSpan,
+                    startIndex,
+                    patternLength,
+                    outputSpan[matchLength..]);
+
+                matchLength += len;
+                // footer
+                "\n[DarkGray]*\n*[/]".AsSpan().AppendTo(outputSpan, ref matchLength);
+
+                _printer.TryPost(memoryOwner, matchLength);
             }
         }
 
@@ -356,11 +384,15 @@ namespace plugins.grep
         /// Restituisce la stringa con i colori applicati attorno al match trovato.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static string ExtractMatchContext(ReadOnlySpan<byte> span, int matchIndex, int patternLength, int maxContext = 50)
+        private static int ExtractMatchContext(
+            ReadOnlySpan<byte> span,
+            int matchIndex,
+            int patternLength,
+            Span<char> output)
         {
-            int start = Math.Max(0, matchIndex - maxContext);
+            int start = Math.Max(0, matchIndex - MaxContextSize);
             int endMatch = matchIndex + patternLength;
-            int end = Math.Min(endMatch + maxContext, span.Length);
+            int end = Math.Min(endMatch + MaxContextSize, span.Length);
 
             var leftSpan = span[start..matchIndex];
             int preNewLine = leftSpan.LastIndexOf((byte)'\n');
@@ -390,7 +422,8 @@ namespace plugins.grep
 
             if (truncatedRight) { "...".AsSpan().CopyTo(buffer[pos..]); pos += 3; }
 
-            return new string(buffer[..pos]);
+            buffer[..pos].CopyTo(output);
+            return pos;
         }
 
         /// <summary>

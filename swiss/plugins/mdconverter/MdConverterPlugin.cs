@@ -555,8 +555,8 @@ namespace plugins.mdconverter
         {
             PrintHelp<MdConverterSettings>(false);
             ConsolePlus.Write("[Cyan]#[/] Feature supportate:");
-            ConsolePlus.Write("[Cyan]#[/] - Google Icons (inserendo il nome delle icone in [Cyan]::nome_icona::[/])");
-            ConsolePlus.Write("[Cyan]#[/] - KateX (tramite blocchi inline [Cyan]$$[/] e blocchi interi [Cyan]$$...$$[/])");
+            ConsolePlus.Write("[Cyan]#[/] - Google Icons (inserendo il nome delle icone in [Green]::nome_icona::[/])");
+            ConsolePlus.Write("[Cyan]#[/] - KateX (tramite blocchi inline [Green]$...$[/] e blocchi interi [Green]$$...$$[/])");
             ConsolePlus.Write("[Cyan]#[/] - Syntax Highlight per qualsiasi linguaggio di programmazione (grazie a PrismjJs)");
             ConsolePlus.Write("[Cyan]#[/] - Grafici tramite Mermaid.JS (live editor qui: https://mermaid.ai/live/edit), opzioni:");
             ConsolePlus.Write("[Cyan]#[/]   --mermaid-theme : definisci il tema che preferisci per i grafici");

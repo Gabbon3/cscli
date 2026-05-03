@@ -253,8 +253,20 @@ public abstract class Plugin
         if (options.Count != 0)
         {
             ConsolePlus.Write("[Cyan]#[/] Opzioni:");
+            string category = options[0].Attr!.Category ?? "";
+            // stampo la categoria
+            if (category != "")
+            {
+                ConsolePlus.Write($"[Cyan]#[/] [Yellow]{category}[/]:");
+            }
             foreach (var opt in options)
             {
+                string currentCategory = opt.Attr!.Category ?? "";
+                if (currentCategory != category)
+                {
+                    category = currentCategory;
+                    ConsolePlus.Write($"[Cyan]#[/] [Yellow]{category}[/]:");
+                }
                 string shortFlag = !string.IsNullOrEmpty(opt.Attr!.ShortName) ? $", -{opt.Attr.ShortName}" : "";
                 string flags = $"--{opt.Attr.LongName}{shortFlag}".PadRight(25);
                 ConsolePlus.Write($"[Cyan]#[/] [Green]{flags}[/] : {opt.Attr.Description}");

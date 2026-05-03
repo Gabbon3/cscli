@@ -1,11 +1,17 @@
 ﻿using System.IO.Enumeration;
 using lib.io;
+using lib.utils;
 using lib.console;
 
 namespace plugins.count
 {
     internal class CountPlugin : Plugin
     {
+        private readonly struct CountEntry(bool isDirectory, long size)
+        {
+            public readonly bool IsDirectory { get; } = isDirectory;
+            public readonly long Size { get; } = size;
+        }
         public override string Name => "count";
         public override string Description => "Conta il numero di file e/o cartelle";
 
@@ -62,36 +68,39 @@ namespace plugins.count
             };
 
             // walker restituisce solo il bool, la logica di filtro ce l'abbiamo gia a monte
-            var walkerReader = FastWalker.Walk<bool>(
+            var walkerReader = FastWalker.Walk<CountEntry>(
                 root,
-                (ref FileSystemEntry entry) => entry.IsDirectory, // transform crazy
+                (ref FileSystemEntry entry) => new CountEntry(entry.IsDirectory, entry.Length), // transform crazy
                 fastWalkerOptions,
                 ct
             );
 
             long filesCount = 0;
             long dirsCount = 0;
+            long bytesCount = 0;
 
             // Lettura dal channel
-            await foreach (bool isDirectory in walkerReader.ReadAllAsync(ct))
+            await foreach (CountEntry entry in walkerReader.ReadAllAsync(ct))
             {
-                if (isDirectory)
+                if (entry.IsDirectory)
                 {
                     dirsCount++;
                 }
                 else
                 {
                     filesCount++;
+                    bytesCount += entry.Size;
                 }
             }
 
             ConsolePlus.Write($"\n[Cyan]#[/] Conteggio completato:");
             ConsolePlus.Write($"[Cyan]*[/] Files: [Yellow]{filesCount:N0}[/]");
+            ConsolePlus.Write($"[Cyan]*[/] Dimensione: [Green]{Formatter.Bytes(bytesCount)}[/]");
             if (settings.IncludeDirectory)
             {
                 ConsolePlus.Write($"[Cyan]*[/] Cartelle: [Blue]{dirsCount:N0}[/]");
             }
-            ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{(filesCount + dirsCount):N0}[/]");
+            ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{filesCount + dirsCount:N0}[/]");
         }
 
         public override void Help()

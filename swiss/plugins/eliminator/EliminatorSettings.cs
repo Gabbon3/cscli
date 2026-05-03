@@ -3,7 +3,6 @@ namespace plugins.eliminator
     public class EliminatorSettings
     {
         // --- ARGOMENTI FISSI ---
-        
         [Fixed(0, "percorso", "Il percorso target da cui avviare la cancellazione (usa '.' per la cartella corrente)")]
         public string TargetPath { get; set; } = string.Empty;
 

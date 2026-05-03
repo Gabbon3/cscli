@@ -163,9 +163,14 @@ namespace plugins.find
         /// </summary>
         private FastWalkerOptions CreateWalkerOptions(FindSettings settings)
         {
+            // attributi file e cartelle
+            FileAttributes attributesToSkip = FileAttributes.System;
+            if (!settings.IncludeHidden) attributesToSkip |= FileAttributes.Hidden;
+            // genero il filtro
             return new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
+                AttributesToSkip = attributesToSkip,
                 RecurseSubdirectories = State.Recurse,
                 Filter = State.FileFilter,
                 BufferSize = 64 * 1024,

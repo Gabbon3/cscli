@@ -14,6 +14,10 @@ namespace plugins.eliminator
 
         private string GlobalTrashPath = "";
         private string DriveRoot = "C:\\";
+        // dimensione padding per prevenire false-sharing su BytesSavedList e DroppedFilesCountList
+        private const int CounterStride = 8;
+        // 
+        private int FlushMask = 511;
         private EliminationState State = new();
 
         // # Stato interno
@@ -31,7 +35,7 @@ namespace plugins.eliminator
             public FileSystemFilter? FileFilter { get; set; }
 
             public Channel<StackFileInfo>? WorkChannel { get; set; }
-            public int[] DroppedFilesCountList { get; set; } = [];
+            public long[] DroppedFilesCountList { get; set; } = [];
             public long[] BytesSavedList { get; set; } = [];
             public bool IsProcessing { get; set; } = true;
         }
@@ -116,8 +120,8 @@ namespace plugins.eliminator
             State.FileFilter = FileFilterFactory.CreateFilter(filterOpts);
 
             // Inizializza gli array per i contatori
-            State.DroppedFilesCountList = new int[State.ThreadNumber];
-            State.BytesSavedList = new long[State.ThreadNumber];
+            State.DroppedFilesCountList = new long[State.ThreadNumber * CounterStride];
+            State.BytesSavedList = new long[State.ThreadNumber * CounterStride];
 
             return true;
         }
@@ -257,7 +261,10 @@ namespace plugins.eliminator
                         Directory.CreateDirectory(currentBatchPath);
                     }
 
-                    int filesDroppedCounter = 0;
+                    long localFlushDropped = 0;
+                    long localFlushBytes = 0;
+                    long totalDropped = 0;
+                    int slot = workerId * CounterStride;
 
                     try
                     {
@@ -265,24 +272,34 @@ namespace plugins.eliminator
                         {
                             try
                             {
-                                filesDroppedCounter++;
-                                State.DroppedFilesCountList[workerId] = filesDroppedCounter;
+                                totalDropped++;
+                                localFlushDropped++;
+                                localFlushBytes += item.Length;
 
                                 if (State.DropInstant)
                                 {
-                                    State.BytesSavedList[workerId] += item.Length;
                                     NativeIO.DeleteFile(item.GetFullPath());
                                 }
                                 else
                                 {
-                                    string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{filesDroppedCounter}.tmp";
-                                    State.BytesSavedList[workerId] += item.Length;
+                                    string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{totalDropped}.tmp";
                                     File.Move(item.GetFullPath(), destPath);
+                                }
+
+                                // ogni 512 elementi faccio il flush dell'array
+                                if ((localFlushDropped & FlushMask) == 0)
+                                {
+                                    State.DroppedFilesCountList[slot] += localFlushDropped;
+                                    State.BytesSavedList[slot] += localFlushBytes;
+
+                                    localFlushDropped = 0;
+                                    localFlushBytes = 0;
+
                                 }
 
                                 // Ogni 4096 elementi, elimina il batch corrente
                                 // solo se non elimino subito i file
-                                if ((filesDroppedCounter & 4095) == 0)
+                                if ((totalDropped & 4095) == 0)
                                 {
                                     batchId++;
                                     // gestisco le cartelle di batch solo se non sto eliminando direttamente i file
@@ -309,7 +326,12 @@ namespace plugins.eliminator
                     }
                     finally
                     {
+                        // invio gli ultimi dati rimasti appesi
+                        State.DroppedFilesCountList[slot] += localFlushDropped;
+                        State.BytesSavedList[slot] += localFlushBytes;
+                        // attendo i task di cancellazione delle cartelle
                         await Task.WhenAll(backgroundWorkerDrops);
+                        // se non stavo cancellando subito ed esiste al working directory allora la cancello
                         if (!State.DropInstant && Directory.Exists(workerRoot))
                         {
                             try { Directory.Delete(workerRoot, true); }
@@ -337,7 +359,7 @@ namespace plugins.eliminator
             {
                 if (State.IsDebug) return;
 
-                int uiLines = State.ThreadNumber + 2;
+                int uiLines = State.ThreadNumber + 3;
                 for (int i = 0; i < uiLines; i++)
                     Console.WriteLine();
 
@@ -346,6 +368,7 @@ namespace plugins.eliminator
                 catch { }
 
                 long lastTotalDropped = 0;
+                long lastTotalBytesSaved = 0;
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
                 try
@@ -356,16 +379,20 @@ namespace plugins.eliminator
                         catch { }
 
                         long currentTotalDropped = 0;
+                        long currentTotalBytesSaved = 0;
 
                         // Stampa righe dei singoli worker
                         for (int i = 0; i < State.ThreadNumber; i++)
                         {
-                            int totalDropped = State.DroppedFilesCountList[i];
-                            currentTotalDropped += totalDropped;
+                            long totalDropped = Volatile.Read(ref State.DroppedFilesCountList[i * CounterStride]);
+                            long totalBytes = Volatile.Read(ref State.BytesSavedList[i * CounterStride]);
 
-                            int currentBatch = totalDropped / 4096;
-                            int currentProgress = totalDropped % 4096;
-                            int dashesCount = currentProgress / 102;
+                            currentTotalDropped += totalDropped;
+                            currentTotalBytesSaved += totalBytes;
+
+                            long currentBatch = totalDropped / 4096;
+                            long currentProgress = totalDropped % 4096;
+                            int dashesCount = (int)currentProgress / 102;
 
                             string bar = new string('-', dashesCount).PadRight(40, ' ');
                             string threadStr = $"T-{i:D2}";
@@ -386,15 +413,16 @@ namespace plugins.eliminator
                             : 0;
 
                         lastTotalDropped = currentTotalDropped;
+                        lastTotalBytesSaved = currentTotalBytesSaved;
                         stopwatch.Restart();
 
-                        // Stampa statistiche globali
-                        string statLine1 = $"[Magenta]>[/] Totale Eliminati: [Magenta]{currentTotalDropped:N0}[/]";
-                        string statLine2 = $"[Magenta]>[/] Velocità Attuale: [Green]{filesPerSecond:N0}[/] file/s";
-                        string statPadding = new(' ', Math.Max(0, consoleWidth - 1 - 45));
+                        string stats =
+                            $"[Magenta]>[/] Totale Eliminati: [Magenta]{currentTotalDropped:N0}[/]\n" +
+                            $"[Magenta]>[/] Velocità Attuale: [Green]{filesPerSecond:N0}[/] file/s\n" +
+                            $"[Magenta]>[/] Spazio liberato: [Magenta]{Formatter.Bytes(currentTotalBytesSaved)}[/]";
 
-                        ConsolePlus.Write(statLine1 + statPadding, newLine: true);
-                        ConsolePlus.Write(statLine2 + statPadding, newLine: true);
+                        // Stampa statistiche globali
+                        ConsolePlus.Write(stats);
 
                         await Task.Delay(200, ct);
                     }
@@ -418,8 +446,8 @@ namespace plugins.eliminator
 
             for (int i = 0; i < State.ThreadNumber; i++)
             {
-                totalDropped += State.DroppedFilesCountList[i];
-                totalBytesSaved += State.BytesSavedList[i];
+                totalDropped += State.DroppedFilesCountList[i * CounterStride];
+                totalBytesSaved += State.BytesSavedList[i * CounterStride];
             }
 
             ConsolePlus.WriteHr(25);

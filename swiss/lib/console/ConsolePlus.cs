@@ -1,3 +1,5 @@
+using System.Net.NetworkInformation;
+
 namespace lib.console;
 
 public static class ConsolePlus
@@ -13,14 +15,13 @@ public static class ConsolePlus
     /// </summary>
     /// <param name="text">testo da stampare a console</param>
     /// <param name="newLine">default true, stampa una nuova linea (come fa Console.WriteLine)</param>
-    public static void Write(string text, bool newLine = true)
+    public static void Write(ReadOnlySpan<char> span, bool newLine = true)
     {
-        if (string.IsNullOrEmpty(text))
+        if (span.Length == 0)
         {
             if (newLine) Console.WriteLine();
             return;
         }
-        ReadOnlySpan<char> span = text.AsSpan();
         ConsoleColor defaultColor = Console.ForegroundColor;
         int length = span.Length;
         int lastPos = 0;
@@ -68,5 +69,25 @@ public static class ConsolePlus
         }
         Console.ForegroundColor = defaultColor;
         if (newLine) Console.WriteLine();
+    }
+
+    /// <summary>
+    /// Write a console passando la String anziche il ReadOnlySpan<char>
+    /// </summary>
+    /// <param name="text"></param>
+    /// <param name="newLine"></param>
+    public static void Write(ReadOnlyMemory<char> text, bool newLine = true)
+    {
+        Write(text.Span, newLine);
+    }
+    
+    /// <summary>
+    /// Write a console passando la String anziche il ReadOnlySpan<char>
+    /// </summary>
+    /// <param name="text"></param>
+    /// <param name="newLine"></param>
+    public static void Write(string text, bool newLine = true)
+    {
+        Write(text.AsSpan(), newLine);
     }
 }

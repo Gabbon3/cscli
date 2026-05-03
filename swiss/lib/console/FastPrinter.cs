@@ -1,13 +1,44 @@
+using System.Buffers;
 using System.Threading.Channels;
 
 namespace lib.console;
+
+public readonly struct PrintPayload : IDisposable
+{
+    private readonly string? _text;
+    private readonly IMemoryOwner<char>? _memoryOwner;
+    private readonly int _length;
+    // espone la memoria a prescindere dall'origine
+    public ReadOnlyMemory<char> Memory => _text != null 
+        ? _text.AsMemory() 
+        : _memoryOwner!.Memory[.._length];
+    // costruttore per le stringhe
+    public PrintPayload(string text)
+    {
+        _text = text;
+        _memoryOwner = null;
+        _length = text.Length;
+    }
+    // costrutture zero allocazioni
+    public PrintPayload(IMemoryOwner<char> memoryOwner, int length)
+    {
+        _text = null;
+        _memoryOwner = memoryOwner;
+        _length = length;
+    }
+    // implemento dispose
+    public void Dispose()
+    {
+        _memoryOwner?.Dispose();
+    }
+}
 
 /// <summary>
 /// Classe utilizzata per stampare a Console ad alte prestazioni utilizzando un channel
 /// </summary>
 public class FastPrinter
 {
-    private readonly Channel<string> _channel;
+    private readonly Channel<PrintPayload> _channel;
     private Task? _fastPrinterTask;
 
     /// <summary>
@@ -26,10 +57,11 @@ public class FastPrinter
     /// <param name="options">opzioni di stampa personalizzate</param>
     public FastPrinter(FastPrinterOptions options)
     {
-        _channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions()
+        _channel = Channel.CreateBounded<PrintPayload>(new BoundedChannelOptions(options.Capacity)
         {
             SingleReader = true,
-            SingleWriter = options.SingleWriter
+            SingleWriter = options.SingleWriter,
+            FullMode = BoundedChannelFullMode.DropNewest
         });
     }
     /// <summary>
@@ -48,7 +80,10 @@ public class FastPrinter
             {
                 await foreach (var item in _channel.Reader.ReadAllAsync())
                 {
-                    ConsolePlus.Write(item);
+                    using (item)
+                    {
+                        ConsolePlus.Write(item.Memory);
+                    }
                 }
             }
             catch (OperationCanceledException) { /* operazione cancellata a mano dall'utente */ }
@@ -60,13 +95,29 @@ public class FastPrinter
     /// </summary>
     /// <param name="item">item T : IPrintable</param>
     /// <returns></returns>
-    public async ValueTask PostAsync(string item) => await _channel.Writer.WriteAsync(item);
+    public ValueTask PostAsync(IMemoryOwner<char> owner, int length)
+    {
+        return _channel.Writer.WriteAsync(new PrintPayload(owner, length));
+    }
+    // Supporto per retrocompatibilità con le stringhe
+    public ValueTask PostAsync(string item)
+    {
+        return _channel.Writer.WriteAsync(new PrintPayload(item));
+    }
     /// <summary>
-    /// Prova a posta il contenuto della console nel channel in maniera sincrona, quindi non viene atteso l'inserimento
+    /// Prova a postare il contenuto della console nel channel in maniera sincrona, quindi non viene atteso l'inserimento
     /// </summary>
     /// <param name="item">item T : IPrintable</param>
     /// <returns>Se false allora non è stato possibile scrivere nel channel</returns>
-    public bool TryPost(string item) => _channel.Writer.TryWrite(item);
+    public bool TryPost(IMemoryOwner<char> owner, int length)
+    {
+        return _channel.Writer.TryWrite(new PrintPayload(owner, length));
+    }
+    // Supporto per retrocompatibilità con le stringhe
+    public bool TryPost(string item)
+    {
+        return _channel.Writer.TryWrite(new PrintPayload(item));
+    }
     /// <summary>
     /// Chiudi il channel e attendo il completamento del task
     /// </summary>

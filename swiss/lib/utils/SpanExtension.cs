@@ -47,5 +47,37 @@ namespace lib.utils
                 }
             }
         }
+
+        /// <summary>
+        /// Copia il contenuto della sequenza corrente in una destinazione, aggiornando l'indice di posizione.
+        /// </summary>
+        /// <typeparam name="T">Il tipo di elementi contenuti nello span.</typeparam>
+        /// <param name="source">Lo span di origine da copiare.</param>
+        /// <param name="destination">Lo span di destinazione.</param>
+        /// <param name="currentIndex">L'indice corrente nella destinazione, incrementato dopo la copia.</param>
+        /// <exception cref="ArgumentOutOfRangeException">Lanciata se la destinazione non ha spazio sufficiente.</exception>
+        public static void AppendTo<T>(this ReadOnlySpan<T> source, Span<T> destination, ref int currentIndex)
+        {
+            if (source.IsEmpty) return;
+            // Utilizziamo lo slicing per definire l'area di scrittura
+            // utilizzo lo slicing per definire l'area di scrittura
+            Span<T> targetWindow = destination[currentIndex..];
+            // copio i dati nella sezione di destinazione
+            // ! lancia ArgumentException se source.Length > targetWindow.Length
+            source.CopyTo(targetWindow);
+            // aggiorno la posizione solo dopo il successo della copia
+            currentIndex += source.Length;
+        }
+        /// <summary>
+        /// Overload per char del metodo AppendTo
+        /// </summary>
+        /// <param name="source"></param>
+        /// <param name="destination"></param>
+        /// <param name="currentIndex"></param>
+        public static void AppendTo(this char source, Span<char> destination, ref int currentIndex)
+        {
+            destination[currentIndex] = source;
+            currentIndex++;
+        }
     }
 }

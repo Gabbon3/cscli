@@ -15,6 +15,9 @@ namespace plugins.find
         [Option("dirs|d", "Includi le cartelle nella ricerca", "Ricerca")]
         public bool Dirs { get; set; }
 
+        [Option("hidden|H", "Includi file e cartelle nascoste nella ricerca", "Ricerca")]
+        public bool IncludeHidden { get; set; } = false;
+
         [Option("ignore-case|i", "Rende case insensitive la ricerca", "Ricerca")]
         public bool IgnoreCase { get; set; }
 
