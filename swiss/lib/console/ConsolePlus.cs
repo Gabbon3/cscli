@@ -30,7 +30,7 @@ public static class ConsolePlus
             if (!(span[i] == '[' && i + 2 < length)) continue;
             if (i > lastPos)
             {
-                Console.Out.Write(span.Slice(lastPos, i - lastPos));
+                Console.Out.Write(span[lastPos..i]);
             }
 
             int closeBracket = -1;
@@ -72,7 +72,7 @@ public static class ConsolePlus
     }
 
     /// <summary>
-    /// Write a console passando la String anziche il ReadOnlySpan<char>
+    /// Write a console passando ReadOnlyMemory anziche il ReadOnlySpan<char>
     /// </summary>
     /// <param name="text"></param>
     /// <param name="newLine"></param>

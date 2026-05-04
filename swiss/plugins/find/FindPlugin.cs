@@ -243,7 +243,6 @@ namespace plugins.find
 
         /// <summary>
         /// Stampa un match semplice (non-ranking) e dispose del StackFileInfo.
-        /// Accede a: nessun accesso a State
         /// </summary>
         private void PrintSimpleMatch(StackFileInfo item)
         {

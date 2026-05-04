@@ -3,41 +3,40 @@ using System.Threading.Channels;
 
 namespace lib.console;
 
-public readonly struct PrintPayload : IDisposable
-{
-    private readonly string? _text;
-    private readonly IMemoryOwner<char>? _memoryOwner;
-    private readonly int _length;
-    // espone la memoria a prescindere dall'origine
-    public ReadOnlyMemory<char> Memory => _text != null 
-        ? _text.AsMemory() 
-        : _memoryOwner!.Memory[.._length];
-    // costruttore per le stringhe
-    public PrintPayload(string text)
-    {
-        _text = text;
-        _memoryOwner = null;
-        _length = text.Length;
-    }
-    // costrutture zero allocazioni
-    public PrintPayload(IMemoryOwner<char> memoryOwner, int length)
-    {
-        _text = null;
-        _memoryOwner = memoryOwner;
-        _length = length;
-    }
-    // implemento dispose
-    public void Dispose()
-    {
-        _memoryOwner?.Dispose();
-    }
-}
-
 /// <summary>
 /// Classe utilizzata per stampare a Console ad alte prestazioni utilizzando un channel
 /// </summary>
 public class FastPrinter
 {
+    private readonly struct PrintPayload : IDisposable
+    {
+        private readonly string? _text;
+        private readonly IMemoryOwner<char>? _memoryOwner;
+        private readonly int _length;
+        // espone la memoria a prescindere dall'origine
+        public ReadOnlyMemory<char> Memory => _text != null
+            ? _text.AsMemory()
+            : _memoryOwner!.Memory[.._length];
+        // costruttore per le stringhe
+        public PrintPayload(string text)
+        {
+            _text = text;
+            _memoryOwner = null;
+            _length = text.Length;
+        }
+        // costrutture zero allocazioni
+        public PrintPayload(IMemoryOwner<char> memoryOwner, int length)
+        {
+            _text = null;
+            _memoryOwner = memoryOwner;
+            _length = length;
+        }
+        // implemento dispose
+        public void Dispose()
+        {
+            _memoryOwner?.Dispose();
+        }
+    }
     private readonly Channel<PrintPayload> _channel;
     private Task? _fastPrinterTask;
 

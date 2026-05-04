@@ -27,6 +27,8 @@ namespace plugins.grep
         private static readonly int MaxContextSize = 50;
         private static readonly int FilesChannelBound = 8192;
         private long TotalMatchCount = 0;
+        private long TotalSizeVisited = 0;
+        private long TotalFileVisited = 0;
 
         private static readonly HashSet<string> DefaultExcludeDirs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -38,6 +40,13 @@ namespace plugins.grep
             "vendor",
             ".cargo",
         };
+
+        // # Struct per leggere i file in input
+        private readonly struct GrepFileEntry(ref FileSystemEntry entry)
+        {
+            public readonly string Path { get; } = entry.ToSpecifiedFullPath();
+            public readonly long Size { get; } = entry.Length;
+        }
 
         // # Stato interno
         private class GrepState
@@ -88,6 +97,8 @@ namespace plugins.grep
                     originalDataSpan,
                     startIndex,
                     patternLength,
+                    // passo al metodo solo la porzione successiva a quella che abbiamo
+                    // precedentemente gia valorizzato quindi da matchLength in poi
                     outputSpan[matchLength..]);
 
                 matchLength += len;
@@ -140,8 +151,10 @@ namespace plugins.grep
                 await _fastPrinter.Complete();
             }
             // 10. termine
-            ConsolePlus.Write($"\n[Cyan]#[/] Ricerca completata:");
+            ConsolePlus.Write($"\n[DarkGray]*\n*[/]\n[Cyan]#[/] Ricerca completata:");
             ConsolePlus.Write($"[Cyan]#[/] Match totali: [Green]{TotalMatchCount:N0}[/]");
+            ConsolePlus.Write($"[Cyan]#[/] File totali controllati: [Magenta]{TotalFileVisited:N0}[/]");
+            ConsolePlus.Write($"[Cyan]#[/] Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]");
             ConsolePlus.WriteHr();
         }
 
@@ -260,9 +273,9 @@ namespace plugins.grep
                 ReturnSpecialDirectories = false
             };
 
-            var enumerable = new FileSystemEnumerable<string>(
+            var enumerable = new FileSystemEnumerable<GrepFileEntry>(
                 State.Root,
-                (ref FileSystemEntry entry) => entry.ToSpecifiedFullPath(),
+                (ref FileSystemEntry entry) => new GrepFileEntry(ref entry),
                 enumerationOptions)
             {
                 ShouldIncludePredicate = (ref FileSystemEntry entry) =>
@@ -289,10 +302,12 @@ namespace plugins.grep
 
             try
             {
-                foreach (var fileInfo in enumerable)
+                foreach (var grepFileEntry in enumerable)
                 {
                     if (ct.IsCancellationRequested) break;
-                    await State.FilesChannel.Writer.WriteAsync(fileInfo, ct);
+                    TotalSizeVisited += grepFileEntry.Size;
+                    TotalFileVisited++;
+                    await State.FilesChannel.Writer.WriteAsync(grepFileEntry.Path, ct);
                 }
             }
             finally
@@ -422,38 +437,42 @@ namespace plugins.grep
             int patternLength,
             Span<char> output)
         {
+            // calcolo le posizioni dei match
             int start = Math.Max(0, matchIndex - MaxContextSize);
             int endMatch = matchIndex + patternLength;
             int end = Math.Min(endMatch + MaxContextSize, span.Length);
-
+            // sinistra del match
             var leftSpan = span[start..matchIndex];
             int preNewLine = leftSpan.LastIndexOf((byte)'\n');
             int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
             bool truncatedLeft = preNewLine == -1 && start > 0;
-
+            // destra del match
             var rightSpan = span[endMatch..end];
             int postNewLine = rightSpan.IndexOf((byte)'\n');
             int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
             if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
             bool truncatedRight = postNewLine == -1 && end < span.Length;
-
+            // assegno le porzioni esatte calcolate
             var exactLeft = span[actualStart..matchIndex];
             var exactMatch = span[matchIndex..endMatch];
             var exactRight = span[endMatch..actualEnd];
-
+            // 14 = 6 (... * 2) + 5 ([Red]) + 3 ([/]) vedi sotto infatti le allocazioni
             Span<char> buffer = stackalloc char[actualEnd - actualStart + 14];
             int pos = 0;
-
+            // se troncato a sinistra aggiungo ...
             if (truncatedLeft) { "...".AsSpan().CopyTo(buffer[pos..]); pos += 3; }
-
+            // assumo che tutto sia UFT-8 (zero sbatta)
+            // estraggo e copio nel buffer la parte a sinistra del match
             int leftChars = Encoding.UTF8.GetChars(exactLeft, buffer[pos..]); pos += leftChars;
             "[Red]".AsSpan().CopyTo(buffer[pos..]); pos += 5;
+            // estraggo e copio nel buffer il match inglobandolo nel testo rosso
             int matchChars = Encoding.UTF8.GetChars(exactMatch, buffer[pos..]); pos += matchChars;
             "[/]".AsSpan().CopyTo(buffer[pos..]); pos += 3;
+            // estraggo e copio nel buffer la parte a destra del match
             int rightChars = Encoding.UTF8.GetChars(exactRight, buffer[pos..]); pos += rightChars;
-
+            // se troncato a destra aggiungo ...
             if (truncatedRight) { "...".AsSpan().CopyTo(buffer[pos..]); pos += 3; }
-
+            // copio il buffer finale nell'output
             buffer[..pos].CopyTo(output);
             return pos;
         }
