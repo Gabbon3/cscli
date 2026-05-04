@@ -13,8 +13,8 @@ using plugins.grep;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.9.5";
-const string versionDescription = "Refactoring Grep, Find";
+const string version = "1.9.6";
+const string versionDescription = "Refactoring Grep";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();

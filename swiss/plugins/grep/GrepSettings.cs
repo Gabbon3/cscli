@@ -1,5 +1,3 @@
-using plugins;
-
 namespace plugins.grep
 {
     public class GrepSettings
@@ -16,6 +14,9 @@ namespace plugins.grep
         public bool IgnoreCase { get; set; }
 
         // --- OPZIONI CON VALORE (Liste separate da virgola) ---
+        [Option("threads|t", "Numero di thread da usare per la ricerca (default: numero di core)")]
+        public int Threads { get; set; } = Environment.ProcessorCount;
+
         [Option("exclude-dir|ex", "Aggiunge cartelle da escludere (separate da virgola)")]
         public string? ExcludeDirs { get; set; }
 

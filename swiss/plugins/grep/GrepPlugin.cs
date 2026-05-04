@@ -25,6 +25,8 @@ namespace plugins.grep
         private AhoCorasick? AhoEngine;
         private FastPrinter _fastPrinter = new();
         private static readonly int MaxContextSize = 50;
+        private static readonly int FilesChannelBound = 8192;
+        private long TotalMatchCount = 0;
 
         private static readonly HashSet<string> DefaultExcludeDirs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -67,16 +69,19 @@ namespace plugins.grep
                 int matchLength = 0;
 
                 int lineNumber = _chunkStartLine + relativeLine;
+                ReadOnlySpan<char> pathSpan = path.AsSpan();
 
                 // header
                 "[Green]#[/] [DarkGray]".AsSpan().AppendTo(outputSpan, ref matchLength);
-                Path.GetDirectoryName(path).AsSpan().AppendTo(outputSpan, ref matchLength);
+                Path.GetDirectoryName(pathSpan).AppendTo(outputSpan, ref matchLength);
                 Path.DirectorySeparatorChar.AppendTo(outputSpan, ref matchLength);
                 "[Cyan]".AsSpan().AppendTo(outputSpan, ref matchLength);
-                Path.GetFileName(path).AsSpan().AppendTo(outputSpan, ref matchLength);
+                Path.GetFileName(pathSpan).AppendTo(outputSpan, ref matchLength);
                 "[/]\n[Green]# [Yellow]".AsSpan().AppendTo(outputSpan, ref matchLength);
-                // TODO: rimuovere ToString -- numero di linea
-                lineNumber.ToString().AsSpan().AppendTo(outputSpan, ref matchLength);
+                if (lineNumber.TryFormat(outputSpan[matchLength..], out int charsWritten))
+                {
+                    matchLength += charsWritten;
+                }
                 ":[/] ".AsSpan().AppendTo(outputSpan, ref matchLength);
                 // estraggo il contesto del match
                 int len = ExtractMatchContext(
@@ -118,17 +123,26 @@ namespace plugins.grep
             // 6. preparo AhoCorasick e il channel del producer
             InitializeEngine();
             ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca...\n[DarkGray]*\n*[/]");
-            // 7. avvio il task per il print a console multithread
-            _fastPrinter.Run(ct);
-            // 8. avvio i task di producer e consumers
-            var producerTask = RunProducerAsync(ct);
-            var workerTasks = StartWorkers(ct);
-            // 9. attendo il termine di tutti i worker
-            await producerTask;
-            await Task.WhenAll(workerTasks);
-            await _fastPrinter.Complete();
+            try
+            {
+                // 7. avvio il task per il print a console multithread
+                _fastPrinter.Run(ct);
+                // 8. avvio i task di producer e consumers
+                var producerTask = RunProducerAsync(ct);
+                var workerTasks = StartWorkers(settings, ct);
+                // 9. attendo il termine di tutti i worker
+                await producerTask;
+                await Task.WhenAll(workerTasks);
+            }
+            catch (OperationCanceledException) { /* Uscita pulita dall'esecuzione */ }
+            finally
+            {
+                await _fastPrinter.Complete();
+            }
             // 10. termine
-            ConsolePlus.Write($"[Cyan]#[/] Ricerca completata");
+            ConsolePlus.Write($"\n[Cyan]#[/] Ricerca completata:");
+            ConsolePlus.Write($"[Cyan]#[/] Match totali: [Green]{TotalMatchCount:N0}[/]");
+            ConsolePlus.WriteHr();
         }
 
         // # ------------------------------ #
@@ -137,7 +151,7 @@ namespace plugins.grep
 
         /// <summary>
         /// Valida il percorso root e il pattern; popola State.Root.
-        /// Accede a: State.Root, settings.TargetPath, settings.IgnoreCase
+        /// Accede a: State.Root, settings.TargetPath, settings.IgnoreCase, settings.Threads
         /// </summary>
         private bool ParseAndValidateSettings(GrepSettings settings)
         {
@@ -151,6 +165,12 @@ namespace plugins.grep
             if (settings.Pattern.Length == 0)
             {
                 PrintError("Il pattern di ricerca non può essere vuoto.");
+                return false;
+            }
+
+            if (settings.Threads < 1 || settings.Threads > 50)
+            {
+                PrintError("Numero di thread non valido (1 <= threads <= 50)");
                 return false;
             }
 
@@ -219,10 +239,11 @@ namespace plugins.grep
         private void InitializeEngine()
         {
             AhoEngine = new AhoCorasick(State.PatternList);
-            State.FilesChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(50000)
+            State.FilesChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(FilesChannelBound)
             {
                 SingleWriter = true,
-                SingleReader = false
+                SingleReader = false,
+                FullMode = BoundedChannelFullMode.Wait
             });
         }
 
@@ -284,20 +305,29 @@ namespace plugins.grep
         /// Avvia un task worker per ogni core disponibile e li restituisce.
         /// Accede a: State.FilesChannel, AhoEngine, LongestPattern, PatternLengths, IgnoreCase, _fastPrinter
         /// </summary>
-        private Task[] StartWorkers(CancellationToken ct)
+        private Task[] StartWorkers(GrepSettings settings, CancellationToken ct)
         {
-            int threads = Environment.ProcessorCount;
-            var workers = new Task[threads];
+            var workers = new Task[settings.Threads];
 
-            for (int i = 0; i < threads; i++)
+            for (int i = 0; i < settings.Threads; i++)
             {
                 workers[i] = Task.Run(async () =>
                 {
                     byte[] workerBuffer = new byte[65536];
                     byte[] lowerBuffer = IgnoreCase ? new byte[65536] : [];
+                    long threadMatchCount = 0;
 
-                    await foreach (var path in State.FilesChannel.Reader.ReadAllAsync(ct))
-                        ProcessFile(path, workerBuffer, lowerBuffer, LongestPattern);
+                    try
+                    {
+                        await foreach (var path in State.FilesChannel.Reader.ReadAllAsync(ct))
+                        {
+                            threadMatchCount += ProcessFile(path, workerBuffer, lowerBuffer, LongestPattern);
+                        }
+                    }
+                    finally
+                    {
+                        Interlocked.Add(ref TotalMatchCount, threadMatchCount);
+                    }
                 }, ct);
             }
 
@@ -312,14 +342,15 @@ namespace plugins.grep
         /// Processa un file cercando il pattern con AhoCorasick a blocchi da 64 KB.
         /// Accede a: AhoEngine, PatternLengths, IgnoreCase, _fastPrinter
         /// </summary>
-        private void ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap)
+        private long ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap)
         {
             SafeFileHandle? handle = null;
+            long matchCount = 0;
             try
             {
                 handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
                 long fileLength = RandomAccess.GetLength(handle);
-                if (fileLength == 0) return;
+                if (fileLength == 0) return 0;
 
                 long fileOffset = 0;
                 int leftover = 0;
@@ -337,7 +368,7 @@ namespace plugins.grep
 
                     if (isFirstChunk)
                     {
-                        if (dataSpan.Contains((byte)0)) return;
+                        if (dataSpan.Contains((byte)0)) return 0;
                         isFirstChunk = false;
                     }
 
@@ -355,7 +386,7 @@ namespace plugins.grep
                     }
 
                     var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter);
-                    AhoEngine!.Search(searchSpan, ref handler);
+                    matchCount += AhoEngine!.Search(searchSpan, ref handler);
 
                     if (currentDataLength > overlap)
                     {
@@ -378,6 +409,7 @@ namespace plugins.grep
             {
                 handle?.Dispose();
             }
+            return matchCount;
         }
 
         /// <summary>

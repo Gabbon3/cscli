@@ -231,11 +231,12 @@ public sealed class AhoCorasick
     /// specializzare e inlinare completamente la chiamata — zero overhead
     /// rispetto a scrivere il loop a mano.
     /// </summary>
-    public void Search<THandler>(ReadOnlySpan<byte> text, ref THandler handler)
+    public long Search<THandler>(ReadOnlySpan<byte> text, ref THandler handler)
         where THandler : struct, IMatchHandler
     {
         int state       = 0;
         int currentLine = 0;
+        long matchCount = 0;
 
         for (int i = 0; i < text.Length; i++)
         {
@@ -253,11 +254,14 @@ public sealed class AhoCorasick
                 if (_output[s] != -1)
                 {
                     int pi = _output[s];
+                    matchCount++;
                     handler.OnMatch(i - _patLen[pi] + 1, i, pi, currentLine);
                 }
                 s = _dict[s];
             }
         }
+
+        return matchCount;
     }
 
     /// <summary>Overload per Span&lt;byte&gt; mutabile.</summary>
