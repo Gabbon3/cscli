@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using lib.algorithm;
 using lib.utils;
 using System.Buffers;
+using lib.io;
 
 namespace plugins.grep
 {
@@ -55,7 +56,6 @@ namespace plugins.grep
             public string[] WordsToSearch = [];
             public ReadOnlyMemory<byte>[] PatternList = [];
             public HashSet<string> ExcludeDirs = new(StringComparer.OrdinalIgnoreCase);
-            public List<string> IncludeGlobs = [];
             public Channel<string> FilesChannel = Channel.CreateBounded<string>(1);
         }
 
@@ -129,19 +129,17 @@ namespace plugins.grep
             BuildPatternList(settings.Pattern);
             // 4. configuro le cartelle da escludere/includere nella ricerca
             ConfigureDirectoryFilters(settings);
-            // 5. configuro i glob pattern dei file su cui effettuare la ricerca
-            ConfigureGlobFilters(settings);
-            // 6. preparo AhoCorasick e il channel del producer
+            // 5. preparo AhoCorasick e il channel del producer
             InitializeEngine();
             ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca...\n[DarkGray]*\n*[/]");
             try
             {
-                // 7. avvio il task per il print a console multithread
+                // 6. avvio il task per il print a console multithread
                 _fastPrinter.Run(ct);
-                // 8. avvio i task di producer e consumers
-                var producerTask = RunProducerAsync(ct);
+                // 7. avvio i task di producer e consumers
+                var producerTask = RunProducerAsync(settings, ct);
                 var workerTasks = StartWorkers(settings, ct);
-                // 9. attendo il termine di tutti i worker
+                // 8. attendo il termine di tutti i worker
                 await producerTask;
                 await Task.WhenAll(workerTasks);
             }
@@ -150,7 +148,7 @@ namespace plugins.grep
             {
                 await _fastPrinter.Complete();
             }
-            // 10. termine
+            // 9. termine
             ConsolePlus.Write($"\n[DarkGray]*\n*[/]\n[Cyan]#[/] Ricerca completata:");
             ConsolePlus.Write($"[Cyan]#[/] Match totali: [Green]{TotalMatchCount:N0}[/]");
             ConsolePlus.Write($"[Cyan]#[/] File totali controllati: [Magenta]{TotalFileVisited:N0}[/]");
@@ -234,18 +232,6 @@ namespace plugins.grep
         }
 
         /// <summary>
-        /// Popola State.IncludeGlobs dai glob specificati in settings.
-        /// Accede a: State.IncludeGlobs, settings.Glob
-        /// </summary>
-        private void ConfigureGlobFilters(GrepSettings settings)
-        {
-            State.IncludeGlobs = [];
-            if (!string.IsNullOrEmpty(settings.Glob))
-                foreach (var glob in settings.Glob.Split(',', StringSplitOptions.RemoveEmptyEntries))
-                    State.IncludeGlobs.Add(glob.Trim());
-        }
-
-        /// <summary>
         /// Inizializza AhoEngine e State.FilesChannel.
         /// Accede a: AhoEngine, State.PatternList, State.FilesChannel
         /// </summary>
@@ -264,15 +250,22 @@ namespace plugins.grep
         /// Enumera i file nel filesystem e li scrive su State.FilesChannel.
         /// Accede a: State.Root, State.ExcludeDirs, State.IncludeGlobs, State.FilesChannel
         /// </summary>
-        private async Task RunProducerAsync(CancellationToken ct)
+        private async Task RunProducerAsync(GrepSettings settings, CancellationToken ct)
         {
+            // preparo le opzioni di enumerazione
             var enumerationOptions = new EnumerationOptions
             {
                 RecurseSubdirectories = true,
                 IgnoreInaccessible = true,
                 ReturnSpecialDirectories = false
             };
-
+            // genero la funzione di filtraggio dei file
+            FileSystemFilter fileFilter = FileFilterFactory.CreateFilter(new FileFilterFactory.FilterOptions
+            {
+                Pattern = settings.Glob,
+                MatchType = FilterFileNameMatchType.Glob,
+            })!;
+            // preparo il motore di enumerazione
             var enumerable = new FileSystemEnumerable<GrepFileEntry>(
                 State.Root,
                 (ref FileSystemEntry entry) => new GrepFileEntry(ref entry),
@@ -281,14 +274,7 @@ namespace plugins.grep
                 ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
                     if (entry.IsDirectory) return false;
-                    if (State.IncludeGlobs.Count == 0) return true;
-
-                    ReadOnlySpan<char> fileName = entry.FileName;
-                    foreach (var glob in State.IncludeGlobs)
-                        if (FileSystemName.MatchesSimpleExpression(glob, fileName, ignoreCase: true))
-                            return true;
-
-                    return false;
+                    return fileFilter(ref entry);
                 },
                 ShouldRecursePredicate = (ref FileSystemEntry entry) =>
                 {
@@ -299,7 +285,7 @@ namespace plugins.grep
                     return true;
                 }
             };
-
+            // avvio
             try
             {
                 foreach (var grepFileEntry in enumerable)
@@ -350,7 +336,7 @@ namespace plugins.grep
         }
 
         // # ------------------------------ #
-        // Metodi di elaborazione (invariati nella logica)
+        // Metodi di elaborazione
         // # ------------------------------ #
 
         /// <summary>
