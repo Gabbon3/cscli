@@ -260,11 +260,11 @@ namespace plugins.grep
                 ReturnSpecialDirectories = false
             };
             // genero la funzione di filtraggio dei file
-            FileSystemFilter fileFilter = FileFilterFactory.CreateFilter(new FileFilterFactory.FilterOptions
+            FileSystemFilter? fileFilter = FileFilterFactory.CreateFilter(new FileFilterFactory.FilterOptions
             {
                 Pattern = settings.Glob,
                 MatchType = FilterFileNameMatchType.Glob,
-            })!;
+            });
             // preparo il motore di enumerazione
             var enumerable = new FileSystemEnumerable<GrepFileEntry>(
                 State.Root,
@@ -274,7 +274,11 @@ namespace plugins.grep
                 ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
                     if (entry.IsDirectory) return false;
-                    return fileFilter(ref entry);
+                    if (fileFilter != null)
+                    {
+                        return fileFilter(ref entry);
+                    }
+                    return true;
                 },
                 ShouldRecursePredicate = (ref FileSystemEntry entry) =>
                 {
