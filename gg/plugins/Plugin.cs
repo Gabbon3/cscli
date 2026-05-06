@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using lib.console;
+using Spectre.Console;
 
 namespace plugins;
 
@@ -227,52 +227,77 @@ public abstract class Plugin
 
         // --- COMPOSIZIONE OUTPUT ---
 
-        // Usage string: [Yellow]gg [Blue]{Name} <fixed1> <fixed2> [opzioni]
-        string usageLine = $"[Cyan]#[/] [Yellow]gg[/] [Blue]{Name}[/]";
+        // # Utilizzo
+        // NOTA: uso [[ ]] per stampare le parentesi quadre letterali in Spectre
+        string safeName = Markup.Escape(Name);
+        string usageLine = $"[yellow]gg[/] [blue]{safeName}[/]";
+
         foreach (var fa in fixedArgs)
         {
-            usageLine += $" [DarkGray]<{fa.Attr!.Name}>[/]";
+            usageLine += $" [grey]<{Markup.Escape(fa.Attr!.Name)}>[/]";
         }
-        if (options.Any()) usageLine += " [DarkGray][opzioni][/]";
+        if (options.Any()) usageLine += " [grey][[opzioni]][/]";
 
-        ConsolePlus.WriteHr();
-        ConsolePlus.Write(usageLine);
+        var usagePanel = new Panel(usageLine)
+            .Header("[bold cyan] Uso [/]")
+            .Border(BoxBorder.Rounded)
+            .Padding(2, 0, 2, 0);
 
-        // Stampa i Fixed (in ordine)
+        AnsiConsole.Write(usagePanel);
+        AnsiConsole.WriteLine();
+
+        var grid = new Grid()
+            .AddColumn(new GridColumn().NoWrap().PadRight(4)) // Colonna Parametri
+            .AddColumn(new GridColumn());                     // Colonna Descrizioni
+
+        // stampa dei Fixed (in ordine)
         if (fixedArgs.Count != 0)
         {
+            grid.AddRow("[bold cyan]Argomenti:[/]", "");
             foreach (var fa in fixedArgs)
             {
-                string argName = $"<{fa.Attr!.Name}>".PadRight(20);
-                ConsolePlus.Write($"[Cyan]#[/] [White]{argName}[/] : {fa.Attr.Description}");
+                grid.AddRow($"  [white]<{Markup.Escape(fa.Attr!.Name)}>[/]", fa.Attr.Description ?? "");
             }
-            ConsolePlus.Write("[Cyan]#[/]");
+            grid.AddEmptyRow();
         }
 
-        // Stampa le Opzioni
+        // stampa Opzioni
         if (options.Count != 0)
         {
-            ConsolePlus.Write("[Cyan]#[/] Opzioni:");
+            grid.AddRow("[bold cyan]Opzioni:[/]", "");
             string category = options[0].Attr!.Category ?? "";
-            // stampo la categoria
-            if (category != "")
+
+            // Stampo la prima categoria
+            if (!string.IsNullOrEmpty(category))
             {
-                ConsolePlus.Write($"[Cyan]#[/] [Yellow]{category}[/]:");
+                grid.AddRow($"  [bold yellow]{Markup.Escape(category)}:[/]", "");
             }
+
             foreach (var opt in options)
             {
                 string currentCategory = opt.Attr!.Category ?? "";
+
                 if (currentCategory != category)
                 {
                     category = currentCategory;
-                    ConsolePlus.Write($"[Cyan]#[/] [Yellow]{category}[/]:");
+                    grid.AddEmptyRow();
+                    grid.AddRow($"  [bold yellow]{Markup.Escape(category)}:[/]", "");
                 }
+
                 string shortFlag = !string.IsNullOrEmpty(opt.Attr!.ShortName) ? $", -{opt.Attr.ShortName}" : "";
-                string flags = $"--{opt.Attr.LongName}{shortFlag}".PadRight(25);
-                ConsolePlus.Write($"[Cyan]#[/] [Green]{flags}[/] : {opt.Attr.Description}");
+                string flags = $"--{opt.Attr.LongName}{shortFlag}";
+
+                grid.AddRow($"    [green]{Markup.Escape(flags)}[/]", opt.Attr.Description ?? "");
             }
         }
-        if (printEndLine) ConsolePlus.WriteHr();
+
+        AnsiConsole.Write(grid);
+
+        if (printEndLine)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.Write(new Rule().RuleStyle("grey"));
+        }
     }
 
     public virtual void Help()

@@ -17,7 +17,6 @@ namespace plugins.count
 
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
-            // il parsing magico in una riga
             var settings = ParseSettings<CountSettings>(args);
 
             // gestione Help o argomenti mancanti
@@ -67,7 +66,6 @@ namespace plugins.count
                 SingleReader = true
             };
 
-            // walker restituisce solo il bool, la logica di filtro ce l'abbiamo gia a monte
             var walkerReader = FastWalker.Walk<CountEntry>(
                 root,
                 (ref FileSystemEntry entry) => new CountEntry(entry.IsDirectory, entry.Length), // transform crazy

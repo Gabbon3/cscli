@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using plugins;
 using lib.console;
+using Spectre.Console;
 // lista plugins
 using plugins.find;
 using plugins.tree;
@@ -168,23 +169,32 @@ static void VersionInfo()
 
 static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryBytes, long gcMemoryDiff)
 {
-    ConsolePlus.WriteHr();
-    ConsolePlus.Write("[Cyan]#[/] Statistiche esecuzione:");
-
-    // tempo reale (wall clock)
-    ConsolePlus.Write($"[Cyan]*[/] Tempo Totale:      [Cyan]{elapsed.TotalSeconds:N4} s[/]");
-
-    // tempo cpu (somma di tutti i core)
     double cpuRatio = elapsed.TotalMilliseconds > 0 ? cpuTime.TotalMilliseconds / elapsed.TotalMilliseconds : 0;
-    ConsolePlus.Write($"[Cyan]*[/] Tempo CPU:         [Yellow]{cpuTime.TotalSeconds:N4} s (avg {cpuRatio:N1}x core)[/]");
-
-    // memoria fisica (RAM)
-    ConsolePlus.Write($"[Cyan]*[/] RAM Picco (Phys):  [Magenta]{peakMemoryBytes / 1024.0 / 1024.0:N2} MB[/]");
-
-    // memoria managed (GC)
     string sign = gcMemoryDiff >= 0 ? "+" : "";
-    ConsolePlus.Write($"[Cyan]*[/] GC Alloc (Delta):  [Gray]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
-    ConsolePlus.WriteHr();
+
+    // 1. Creiamo una griglia per allineare i dati in due colonne
+    var grid = new Grid()
+        .AddColumn(new GridColumn().NoWrap().PadRight(4)) // Colonna Etichette
+        .AddColumn(new GridColumn().NoWrap());            // Colonna Valori
+
+    // 2. Aggiungiamo i dati riga per riga
+    grid.AddRow("[cyan]Tempo Totale:[/]", $"[cyan]{elapsed.TotalSeconds:N4} s[/]");
+    grid.AddRow("[cyan]Tempo CPU:[/]", $"[yellow]{cpuTime.TotalSeconds:N4} s[/] [grey](avg {cpuRatio:N1}x core)[/]");
+    grid.AddRow("[cyan]RAM Picco (Phys):[/]", $"[magenta]{peakMemoryBytes / 1024.0 / 1024.0:N2} MB[/]");
+    grid.AddRow("[cyan]GC Alloc (Delta):[/]", $"[grey]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
+
+    // 3. Avvolgiamo la griglia in un pannello decorato
+    var panel = new Panel(grid)
+        .Header("[bold cyan]Statistiche di Esecuzione[/]")
+        .Border(BoxBorder.Rounded)
+        .BorderColor(Color.DarkCyan)
+        .Padding(2, 1, 2, 1); // Padding interno (sinistra, sopra, destra, sotto)
+
+    // Aggiungiamo uno spazio vuoto prima del pannello per distanziarlo dall'output del plugin
+    AnsiConsole.WriteLine();
+    
+    // Stampiamo il capolavoro
+    AnsiConsole.Write(panel);
 }
 // # -------------------------- #
 // dotnet build /t:PublishRelease

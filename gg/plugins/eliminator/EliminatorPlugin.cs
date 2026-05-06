@@ -4,6 +4,7 @@ using lib.io;
 using lib.utils;
 using lib.console;
 using lib.io.stack;
+using Spectre.Console;
 
 namespace plugins.eliminator
 {
@@ -349,7 +350,7 @@ namespace plugins.eliminator
         // # ---------------------------------- #
 
         /// <summary>
-        /// Crea il task che monitora e visualizza il progresso in tempo reale.
+        /// Crea il task che monitora e visualizza il progresso in tempo reale usando Spectre.Console.
         /// Accede a: State.ThreadNumber, State.IsDebug, State.DroppedFilesCountList, 
         ///           State.IsProcessing
         /// </summary>
@@ -359,73 +360,77 @@ namespace plugins.eliminator
             {
                 if (State.IsDebug) return;
 
-                int uiLines = State.ThreadNumber + 3;
-                for (int i = 0; i < uiLines; i++)
-                    Console.WriteLine();
-
-                int consoleWidth = 80;
-                try { consoleWidth = Console.WindowWidth; }
-                catch { }
-
                 long lastTotalDropped = 0;
                 long lastTotalBytesSaved = 0;
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
                 try
                 {
-                    while (State.IsProcessing && !ct.IsCancellationRequested)
-                    {
-                        try { Console.SetCursorPosition(0, Math.Max(0, Console.CursorTop - uiLines)); }
-                        catch { }
-
-                        long currentTotalDropped = 0;
-                        long currentTotalBytesSaved = 0;
-
-                        // Stampa righe dei singoli worker
-                        for (int i = 0; i < State.ThreadNumber; i++)
+                    // Avviamo un blocco Live di Spectre.Console
+                    // Partiamo con un Grid vuoto che popoleremo nel loop
+                    await AnsiConsole.Live(new Grid())
+                        .Cropping(VerticalOverflowCropping.Bottom) // Taglia se il terminale è troppo piccolo
+                        .StartAsync(async ctx =>
                         {
-                            long totalDropped = Volatile.Read(ref State.DroppedFilesCountList[i * CounterStride]);
-                            long totalBytes = Volatile.Read(ref State.BytesSavedList[i * CounterStride]);
+                            while (State.IsProcessing && !ct.IsCancellationRequested)
+                            {
+                                long currentTotalDropped = 0;
+                                long currentTotalBytesSaved = 0;
 
-                            currentTotalDropped += totalDropped;
-                            currentTotalBytesSaved += totalBytes;
+                                // Creiamo un nuovo Grid ad ogni iterazione per l'aggiornamento
+                                var grid = new Grid()
+                                    .AddColumn(new GridColumn().NoWrap()) // Colonna 1: Thread & Batch
+                                    .AddColumn(new GridColumn().NoWrap().RightAligned()) // Colonna 2: Contatore file
+                                    .AddColumn(new GridColumn().NoWrap()); // Colonna 3: Barra di progresso
 
-                            long currentBatch = totalDropped / 4096;
-                            long currentProgress = totalDropped % 4096;
-                            int dashesCount = (int)currentProgress / 102;
+                                // Popoliamo le righe dei worker
+                                for (int i = 0; i < State.ThreadNumber; i++)
+                                {
+                                    long totalDropped = Volatile.Read(ref State.DroppedFilesCountList[i * CounterStride]);
+                                    long totalBytes = Volatile.Read(ref State.BytesSavedList[i * CounterStride]);
 
-                            string bar = new string('-', dashesCount).PadRight(40, ' ');
-                            string threadStr = $"T-{i:D2}";
-                            string batchNum = currentBatch.ToString().PadLeft(3);
-                            string dropStr = totalDropped.ToString().PadLeft(7);
+                                    currentTotalDropped += totalDropped;
+                                    currentTotalBytesSaved += totalBytes;
 
-                            string coloredLine = $"[Yellow]{threadStr}[/] [DarkGray](B:[/][White]{batchNum}[/][DarkGray])[/] [Cyan]{dropStr}[/] [DarkGray]|[/][Green]{bar}[/][DarkGray]|[/]";
-                            int visibleLength = 63;
-                            string padding = new string(' ', Math.Max(0, consoleWidth - 1 - visibleLength));
+                                    long currentBatch = totalDropped / 4096;
+                                    long currentProgress = totalDropped % 4096;
+                                    int dashesCount = (int)currentProgress / 102; // max 40 per 4096
 
-                            ConsolePlus.Write(coloredLine + padding, newLine: true);
-                        }
+                                    string bar = new string('-', dashesCount).PadRight(40, ' ');
 
-                        // Calcolo della velocità
-                        double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
-                        double filesPerSecond = elapsedSeconds > 0
-                            ? (currentTotalDropped - lastTotalDropped) / elapsedSeconds
-                            : 0;
+                                    // Usiamo Markup.Escape se ci fossero variabili ignote, 
+                                    // ma qui sono numeri quindi possiamo usare i tag direttamente.
+                                    string threadInfo = $"[yellow]T-{i:D2}[/] [darkgray](B:[white]{currentBatch,3}[/])[/]";
+                                    string dropCount = $"[cyan]{totalDropped}[/]";
+                                    string coloredBar = $"[darkgray]|[/][green]{bar}[/][darkgray]|[/]";
 
-                        lastTotalDropped = currentTotalDropped;
-                        lastTotalBytesSaved = currentTotalBytesSaved;
-                        stopwatch.Restart();
+                                    grid.AddRow(threadInfo, dropCount, coloredBar);
+                                }
 
-                        string stats =
-                            $"[Magenta]>[/] Totale Eliminati: [Magenta]{currentTotalDropped:N0}[/]\n" +
-                            $"[Magenta]>[/] Velocità Attuale: [Green]{filesPerSecond:N0}[/] file/s\n" +
-                            $"[Magenta]>[/] Spazio liberato: [Magenta]{Formatter.Bytes(currentTotalBytesSaved)}[/]";
+                                // Calcolo della velocità
+                                double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
+                                double filesPerSecond = elapsedSeconds > 0
+                                    ? (currentTotalDropped - lastTotalDropped) / elapsedSeconds
+                                    : 0;
 
-                        // Stampa statistiche globali
-                        ConsolePlus.Write(stats);
+                                lastTotalDropped = currentTotalDropped;
+                                lastTotalBytesSaved = currentTotalBytesSaved;
+                                stopwatch.Restart();
 
-                        await Task.Delay(200, ct);
-                    }
+                                // Aggiungiamo una riga vuota come separatore
+                                grid.AddEmptyRow();
+
+                                // Aggiungiamo le statistiche globali spalmando il testo sulla prima colonna
+                                grid.AddRow(new Markup($"[magenta]>[/] Totale Eliminati: [magenta]{currentTotalDropped:N0}[/]"));
+                                grid.AddRow(new Markup($"[magenta]>[/] Velocità Attuale: [green]{filesPerSecond:N0}[/] file/s"));
+                                grid.AddRow(new Markup($"[magenta]>[/] Spazio liberato:  [magenta]{Formatter.Bytes(currentTotalBytesSaved)}[/]"));
+
+                                // Chiediamo a Spectre di ridisegnare il Grid aggiornato
+                                ctx.UpdateTarget(grid);
+
+                                await Task.Delay(200, ct);
+                            }
+                        });
                 }
                 catch (TaskCanceledException) { }
             }, ct);
