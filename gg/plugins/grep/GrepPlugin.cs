@@ -149,7 +149,7 @@ namespace plugins.grep
                 await _fastPrinter.Complete();
             }
             // 9. termine
-            ConsolePlus.Write($"\n[DarkGray]*\n*[/]\n[Cyan]#[/] Ricerca completata:");
+            ConsolePlus.Write($"[Cyan]#[/] Ricerca completata:");
             ConsolePlus.Write($"[Cyan]#[/] Match totali: [Green]{TotalMatchCount:N0}[/]");
             ConsolePlus.Write($"[Cyan]#[/] File totali controllati: [Magenta]{TotalFileVisited:N0}[/]");
             ConsolePlus.Write($"[Cyan]#[/] Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]");
@@ -223,12 +223,20 @@ namespace plugins.grep
             State.ExcludeDirs = new HashSet<string>(DefaultExcludeDirs, StringComparer.OrdinalIgnoreCase);
 
             if (!string.IsNullOrEmpty(settings.ExcludeDirs))
+            {
                 foreach (var dir in settings.ExcludeDirs.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
                     State.ExcludeDirs.Add(dir.Trim());
+                }
+            }
 
             if (!string.IsNullOrEmpty(settings.IncludeDirs))
+            {
                 foreach (var dir in settings.IncludeDirs.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
                     State.ExcludeDirs.Remove(dir.Trim());
+                }
+            }
         }
 
         /// <summary>
@@ -352,11 +360,11 @@ namespace plugins.grep
             SafeFileHandle? handle = null;
             long matchCount = 0;
             try
-            {
+            { 
                 handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
                 long fileLength = RandomAccess.GetLength(handle);
                 if (fileLength == 0) return 0;
-
+ 
                 long fileOffset = 0;
                 int leftover = 0;
                 int totalLines = 1;

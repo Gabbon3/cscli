@@ -15,7 +15,7 @@ namespace plugins.cripto
 
         // # Costanti
         private const int ChunkSize = 1024 * 1024; // 1MB per chunk
-        private static readonly byte[] MasterSalt = Encoding.UTF8.GetBytes("Swiss_Master_Salt_2024_V1");
+        private static readonly byte[] MasterSalt = Encoding.UTF8.GetBytes("Gg_Master_Salt_2024_V1");
 
         // # Stato interno
         private class CriptoState
@@ -291,7 +291,7 @@ namespace plugins.cripto
         /// </summary>
         private string GetKeyPath(string keyName)
         {
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), $".swiss_{keyName}.key");
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), $".gg_{keyName}.key");
         }
 
         // # ---------------------------------- #

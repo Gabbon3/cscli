@@ -44,7 +44,7 @@ List<PluginRegistration> plugins = [
 // # --------------------------------- #
 if (args.Length == 0)
 {
-    ConsolePlus.Write("[Yellow][ ! ] Nessun comando inserito[/]\n[ i ] [Cyan]swiss --help[/] oppure [Cyan]swiss -h[/] per ottenere maggiori informazioni");
+    ConsolePlus.Write("[Yellow][ ! ] Nessun comando inserito[/]\n[ i ] [Cyan]gg --help[/] oppure [Cyan]gg -h[/] per ottenere maggiori informazioni");
     //Help(plugins);
     return;
 }

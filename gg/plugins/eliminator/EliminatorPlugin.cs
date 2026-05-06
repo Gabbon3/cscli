@@ -138,7 +138,7 @@ namespace plugins.eliminator
         private bool InitializeTrashPath()
         {
             DriveRoot = Path.GetPathRoot(Path.GetFullPath(State.TargetPath)) ?? "C:\\";
-            GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
+            GlobalTrashPath = Path.Combine(DriveRoot, $".gg_trash_{Guid.NewGuid()}");
 
             if (State.DropInstant)
                 return true;

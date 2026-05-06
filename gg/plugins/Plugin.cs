@@ -227,8 +227,8 @@ public abstract class Plugin
 
         // --- COMPOSIZIONE OUTPUT ---
 
-        // Usage string: [Yellow]swiss [Blue]{Name} <fixed1> <fixed2> [opzioni]
-        string usageLine = $"[Cyan]#[/] [Yellow]swiss[/] [Blue]{Name}[/]";
+        // Usage string: [Yellow]gg [Blue]{Name} <fixed1> <fixed2> [opzioni]
+        string usageLine = $"[Cyan]#[/] [Yellow]gg[/] [Blue]{Name}[/]";
         foreach (var fa in fixedArgs)
         {
             usageLine += $" [DarkGray]<{fa.Attr!.Name}>[/]";

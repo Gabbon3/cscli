@@ -65,7 +65,7 @@ public static class ConsolePlus
         }
         if (lastPos < length)
         {
-            Console.Out.Write(span.Slice(lastPos));
+            Console.Out.Write(span[lastPos..]);
         }
         Console.ForegroundColor = defaultColor;
         if (newLine) Console.WriteLine();

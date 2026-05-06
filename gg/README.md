@@ -1,6 +1,6 @@
-# Swiss C# CLI
+# Gg C# CLI
 
-Swiss è un toolkit ricco di plugin:
+Gg è un toolkit ricco di plugin:
 - `find`: il comando **find** è uno strumento molto simile a fd, quello scritto in Rust
 - `eliminator`: tramite regex e tante opzioni ti permette di eliminare con precisione e velocita grandi quantità di file
 	- **Attenzione**: le operazioni lanciate dall'eliminator non sono reversibili
