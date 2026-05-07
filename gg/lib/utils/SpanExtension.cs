@@ -79,5 +79,40 @@ namespace lib.utils
             destination[currentIndex] = source;
             currentIndex++;
         }
+        /// <summary>
+        /// Copia il contenuto della sequenza in una destinazione e restituisce lo slice rimanente.
+        /// Ottimo per concatenazioni a catena (fluent pattern) infinite con zero allocazioni.
+        /// </summary>
+        /// <typeparam name="T">Il tipo di elementi contenuti nello span.</typeparam>
+        /// <param name="destination">Lo span di destinazione in cui scrivere.</param>
+        /// <param name="source">Lo span di origine da copiare.</param>
+        /// <returns>La porzione di span destinazione rimanente e libera.</returns>
+        /// <exception cref="ArgumentException">Lanciata se la destinazione non ha spazio sufficiente.</exception>
+        public static Span<T> AppendNext<T>(this Span<T> destination, ReadOnlySpan<T> source)
+        {
+            if (source.IsEmpty) return destination;
+            
+            // copio i dati direttamente nell'area indicata
+            source.CopyTo(destination);
+            
+            // restituisco solo l'area di memoria ancora non scritta
+            return destination[source.Length..];
+        }
+        /// <summary>
+        /// Overload per singolo char del metodo AppendNext.
+        /// Ottimo per concatenare caratteri singoli nel flusso senza allocazioni.
+        /// </summary>
+        /// <param name="destination">Lo span di destinazione.</param>
+        /// <param name="source">Il carattere da copiare.</param>
+        /// <returns>La porzione di span destinazione rimanente e libera.</returns>
+        /// <exception cref="IndexOutOfRangeException">Lanciata se la destinazione è vuota.</exception>
+        public static Span<char> AppendNext(this Span<char> destination, char source)
+        {
+            // Scrive sempre in prima posizione
+            destination[0] = source;
+            
+            // Restituisce lo span "tagliando" il carattere appena scritto
+            return destination[1..];
+        }
     }
 }

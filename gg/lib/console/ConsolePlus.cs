@@ -1,5 +1,3 @@
-using System.Net.NetworkInformation;
-
 namespace lib.console;
 
 public static class ConsolePlus

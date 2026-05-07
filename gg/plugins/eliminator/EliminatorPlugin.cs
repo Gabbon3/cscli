@@ -18,7 +18,7 @@ namespace plugins.eliminator
         // dimensione padding per prevenire false-sharing su BytesSavedList e DroppedFilesCountList
         private const int CounterStride = 8;
         // 
-        private int FlushMask = 511;
+        private int FlushMask = 127;
         private EliminationState State = new();
 
         // # Stato interno
@@ -366,10 +366,9 @@ namespace plugins.eliminator
 
                 try
                 {
-                    // Avviamo un blocco Live di Spectre.Console
-                    // Partiamo con un Grid vuoto che popoleremo nel loop
-                    await AnsiConsole.Live(new Grid())
-                        .Cropping(VerticalOverflowCropping.Bottom) // Taglia se il terminale è troppo piccolo
+                    // Partiamo con un oggetto vuoto, aggiorneremo con Rows
+                    await AnsiConsole.Live(new Text(""))
+                        .Cropping(VerticalOverflowCropping.Bottom)
                         .StartAsync(async ctx =>
                         {
                             while (State.IsProcessing && !ct.IsCancellationRequested)
@@ -377,13 +376,12 @@ namespace plugins.eliminator
                                 long currentTotalDropped = 0;
                                 long currentTotalBytesSaved = 0;
 
-                                // Creiamo un nuovo Grid ad ogni iterazione per l'aggiornamento
-                                var grid = new Grid()
-                                    .AddColumn(new GridColumn().NoWrap()) // Colonna 1: Thread & Batch
-                                    .AddColumn(new GridColumn().NoWrap().RightAligned()) // Colonna 2: Contatore file
-                                    .AddColumn(new GridColumn().NoWrap()); // Colonna 3: Barra di progresso
+                                // 1. GRID DEI WORKER (Colonne fisse per allineamento perfetto)
+                                var workerGrid = new Grid()
+                                    .AddColumn(new GridColumn().Width(16).NoWrap()) // T-XX (B:XXX)
+                                    .AddColumn(new GridColumn().Width(10).RightAligned().NoWrap()) // File eliminati
+                                    .AddColumn(new GridColumn().NoWrap().LeftAligned()); // Barra
 
-                                // Popoliamo le righe dei worker
                                 for (int i = 0; i < State.ThreadNumber; i++)
                                 {
                                     long totalDropped = Volatile.Read(ref State.DroppedFilesCountList[i * CounterStride]);
@@ -394,20 +392,17 @@ namespace plugins.eliminator
 
                                     long currentBatch = totalDropped / 4096;
                                     long currentProgress = totalDropped % 4096;
-                                    int dashesCount = (int)currentProgress / 102; // max 40 per 4096
-
+                                    int dashesCount = (int)(currentProgress / 102);
                                     string bar = new string('-', dashesCount).PadRight(40, ' ');
 
-                                    // Usiamo Markup.Escape se ci fossero variabili ignote, 
-                                    // ma qui sono numeri quindi possiamo usare i tag direttamente.
-                                    string threadInfo = $"[yellow]T-{i:D2}[/] [darkgray](B:[white]{currentBatch,3}[/])[/]";
-                                    string dropCount = $"[cyan]{totalDropped}[/]";
-                                    string coloredBar = $"[darkgray]|[/][green]{bar}[/][darkgray]|[/]";
-
-                                    grid.AddRow(threadInfo, dropCount, coloredBar);
+                                    workerGrid.AddRow(
+                                        $"[yellow]T-{i:D2}[/] [grey](B:[white]{currentBatch,3}[/])[/]",
+                                        $"[cyan]{totalDropped}[/]",
+                                        $"[grey]|[/][green]{bar}[/][grey]|[/]"
+                                    );
                                 }
 
-                                // Calcolo della velocità
+                                // Calcoli velocità
                                 double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
                                 double filesPerSecond = elapsedSeconds > 0
                                     ? (currentTotalDropped - lastTotalDropped) / elapsedSeconds
@@ -417,18 +412,20 @@ namespace plugins.eliminator
                                 lastTotalBytesSaved = currentTotalBytesSaved;
                                 stopwatch.Restart();
 
-                                // Aggiungiamo una riga vuota come separatore
-                                grid.AddEmptyRow();
+                                // 2. GRID DEL SOMMARIO (Colonna singola per evitare wrap)
+                                var summaryGrid = new Grid().AddColumn(new GridColumn().NoWrap());
+                                summaryGrid.AddEmptyRow();
 
-                                // Aggiungiamo le statistiche globali spalmando il testo sulla prima colonna
-                                grid.AddRow(new Markup($"[magenta]>[/] Totale Eliminati: [magenta]{currentTotalDropped:N0}[/]"));
-                                grid.AddRow(new Markup($"[magenta]>[/] Velocità Attuale: [green]{filesPerSecond:N0}[/] file/s"));
-                                grid.AddRow(new Markup($"[magenta]>[/] Spazio liberato:  [magenta]{Formatter.Bytes(currentTotalBytesSaved)}[/]"));
+                                summaryGrid.AddRow($"[magenta]>[/] [white]Totale Eliminati :[/] [cyan]{currentTotalDropped:N0}[/]");
+                                summaryGrid.AddRow($"[magenta]>[/] [white]Spazio Liberato  :[/] [magenta]{Formatter.Bytes(currentTotalBytesSaved)}[/]");
 
-                                // Chiediamo a Spectre di ridisegnare il Grid aggiornato
-                                ctx.UpdateTarget(grid);
+                                string fpsStr = $"{(int)filesPerSecond:N0} f/s";
+                                summaryGrid.AddRow($"[magenta]>[/] [white]Velocità Attuale :[/] [green]{fpsStr}[/]");
 
-                                await Task.Delay(200, ct);
+                                // 3. UPDATE TARGET con l'unione delle due griglie
+                                ctx.UpdateTarget(new Rows(workerGrid, summaryGrid));
+
+                                await Task.Delay(250, ct);
                             }
                         });
                 }

@@ -29,11 +29,11 @@ namespace plugins.move
 
         // --- OPZIONI CON VALORE ---
 
-        [Option("threads|t", "Specifica il numero massimo di thread (default: numero di core della CPU)")]
-        public int? Threads { get; set; }
-
         [Option("pattern|p", "Filtra i file in base a un'espressione regolare sul nome")]
         public string? Pattern { get; set; }
+
+        [Option("threads|t", "Specifica il numero massimo di thread (default: numero di core della CPU)")]
+        public int? Threads { get; set; }
 
         [Option("since|s", "Colpisce solo i file modificati da questa data in poi")]
         public DateTime? Since { get; set; } 

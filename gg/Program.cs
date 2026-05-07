@@ -10,12 +10,13 @@ using plugins.count;
 using plugins.mdconverter;
 using plugins.cripto;
 using plugins.grep;
+using plugins.move;
 // # ----------------------- #
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.9.6";
-const string versionDescription = "Refactoring Grep";
+const string version = "1.9.7";
+const string versionDescription = "Move Plugin";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -37,6 +38,7 @@ List<PluginRegistration> plugins = [
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
     new("cripto", "Effettua la crittografia su file o cartelle legata all'utente Windows", () => new CriptoPlugin()),
     new("grep", "Ricerca stringhe multiple con AhoCorasick (limitato ASCII - lavora con i byte grezzi)", () => new GrepPlugin()),
+    new("move", "Tool massivo ad altissime prestazioni per lo spostamento di file e cartelle", () => new MovePlugin()),
 ];
 // # ----------------------- #
 
