@@ -291,7 +291,7 @@ namespace plugins.cripto
         /// </summary>
         private string GetKeyPath(string keyName)
         {
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), $".gg_{keyName}.key");
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), $".swiss_{keyName}.key");
         }
 
         // # ---------------------------------- #

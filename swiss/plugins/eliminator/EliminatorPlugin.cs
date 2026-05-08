@@ -39,6 +39,7 @@ namespace plugins.eliminator
             public long[] DroppedFilesCountList { get; set; } = [];
             public long[] BytesSavedList { get; set; } = [];
             public bool IsProcessing { get; set; } = true;
+            public bool DropTargetPathAtEnd { get; set; } = false;
         }
 
         // # Esecuzione Principale
@@ -84,7 +85,7 @@ namespace plugins.eliminator
             await producerTask;
 
             // pulizia finale
-            CleanupTrashPath();
+            Cleanup();
 
             // 6. stampa statistiche finali
             PrintFinalStatistics();
@@ -120,6 +121,8 @@ namespace plugins.eliminator
 
             State.FileFilter = FileFilterFactory.CreateFilter(filterOpts);
 
+            State.DropTargetPathAtEnd = settings.DropSource;
+
             // Inizializza gli array per i contatori
             State.DroppedFilesCountList = new long[State.ThreadNumber * CounterStride];
             State.BytesSavedList = new long[State.ThreadNumber * CounterStride];
@@ -139,7 +142,7 @@ namespace plugins.eliminator
         private bool InitializeTrashPath()
         {
             DriveRoot = Path.GetPathRoot(Path.GetFullPath(State.TargetPath)) ?? "C:\\";
-            GlobalTrashPath = Path.Combine(DriveRoot, $".gg_trash_{Guid.NewGuid()}");
+            GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
 
             if (State.DropInstant)
                 return true;
@@ -378,8 +381,8 @@ namespace plugins.eliminator
 
                                 // 1. GRID DEI WORKER (Colonne fisse per allineamento perfetto)
                                 var workerGrid = new Grid()
-                                    .AddColumn(new GridColumn().Width(16).NoWrap()) // T-XX (B:XXX)
-                                    .AddColumn(new GridColumn().Width(10).RightAligned().NoWrap()) // File eliminati
+                                    .AddColumn(new GridColumn().Width(12).NoWrap()) // T-XX (B:XXX)
+                                    .AddColumn(new GridColumn().Width(11).RightAligned().NoWrap()) // File eliminati max 999.999.999
                                     .AddColumn(new GridColumn().NoWrap().LeftAligned()); // Barra
 
                                 for (int i = 0; i < State.ThreadNumber; i++)
@@ -397,7 +400,7 @@ namespace plugins.eliminator
 
                                     workerGrid.AddRow(
                                         $"[yellow]T-{i:D2}[/] [grey](B:[white]{currentBatch,3}[/])[/]",
-                                        $"[cyan]{totalDropped}[/]",
+                                        $"[cyan]{totalDropped:N0}[/]",
                                         $"[grey]|[/][green]{bar}[/][grey]|[/]"
                                     );
                                 }
@@ -467,11 +470,18 @@ namespace plugins.eliminator
         /// Elimina la cartella del cestino temporaneo.
         /// Dipende da: GlobalTrashPath
         /// </summary>
-        private void CleanupTrashPath()
+        private void Cleanup()
         {
             if (Directory.Exists(GlobalTrashPath))
             {
+                ConsolePlus.Write($"[Red]#[/] Pulisco il cestino...");
                 try { Directory.Delete(GlobalTrashPath, true); }
+                catch { }
+            }
+            if (State.DropTargetPathAtEnd && Directory.Exists(State.TargetPath))
+            {
+                ConsolePlus.Write($"[Red]#[/] Rimuovo {State.TargetPath}...");
+                try { Directory.Delete(State.TargetPath, true); }
                 catch { }
             }
         }

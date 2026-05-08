@@ -6,6 +6,7 @@ namespace lib.utils
 {
     public static class SpanExtensions
     {
+        #region stringhe
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ToLowerAsciiSafe(this Span<byte> span)
         {
@@ -48,6 +49,9 @@ namespace lib.utils
             }
         }
 
+        #endregion
+        #region appends
+
         /// <summary>
         /// Copia il contenuto della sequenza corrente in una destinazione, aggiornando l'indice di posizione.
         /// </summary>
@@ -82,19 +86,22 @@ namespace lib.utils
         /// <summary>
         /// Copia il contenuto della sequenza in una destinazione e restituisce lo slice rimanente.
         /// Ottimo per concatenazioni a catena (fluent pattern) infinite con zero allocazioni.
+        /// Spiegazione: da_copiare.AppendNext(destinazione) => [destinazione+da_copiare]
+        /// Attenzione che destinazione deve avere abbastanza spazio 
         /// </summary>
         /// <typeparam name="T">Il tipo di elementi contenuti nello span.</typeparam>
         /// <param name="destination">Lo span di destinazione in cui scrivere.</param>
         /// <param name="source">Lo span di origine da copiare.</param>
         /// <returns>La porzione di span destinazione rimanente e libera.</returns>
         /// <exception cref="ArgumentException">Lanciata se la destinazione non ha spazio sufficiente.</exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Span<T> AppendNext<T>(this Span<T> destination, ReadOnlySpan<T> source)
         {
             if (source.IsEmpty) return destination;
-            
+
             // copio i dati direttamente nell'area indicata
             source.CopyTo(destination);
-            
+
             // restituisco solo l'area di memoria ancora non scritta
             return destination[source.Length..];
         }
@@ -106,13 +113,50 @@ namespace lib.utils
         /// <param name="source">Il carattere da copiare.</param>
         /// <returns>La porzione di span destinazione rimanente e libera.</returns>
         /// <exception cref="IndexOutOfRangeException">Lanciata se la destinazione è vuota.</exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static Span<char> AppendNext(this Span<char> destination, char source)
         {
             // Scrive sempre in prima posizione
             destination[0] = source;
-            
+
             // Restituisce lo span "tagliando" il carattere appena scritto
             return destination[1..];
         }
+        #endregion
+        #region path
+        /// <summary>
+        /// Combina due path passati come Span<char>
+        /// </summary>
+        /// <param name="source"></param>
+        /// <param name="pathToCombine"></param>
+        /// <param name="endWithSeparator">se true mette il separatore al fondo della stringa</param>
+        /// <returns></returns>
+        public static Span<char> PathCombine(this Span<char> source, ReadOnlySpan<char> pathToCombine, bool endWithSeparator = false)
+        {
+            if (pathToCombine.IsEmpty && !endWithSeparator)
+                return source;
+
+            // 1. Aggiungiamo il separatore PRIMA, ma solo se NON siamo all'inizio del buffer originale
+            Span<char> current = source;
+            // se pathToCombine inizia con un separatore, skippo
+            if (!pathToCombine.IsEmpty && (pathToCombine[0] == Path.DirectorySeparatorChar || pathToCombine[0] == Path.AltDirectorySeparatorChar))
+            {
+                pathToCombine = pathToCombine[1..];
+            }
+            // aggiungo path
+            current = current.AppendNext(pathToCombine);
+            // separatore finale
+            if (endWithSeparator)
+            {
+                // aggiungo solo se non ce già
+                if (pathToCombine.IsEmpty || (pathToCombine[^1] != Path.DirectorySeparatorChar && pathToCombine[^1] != Path.AltDirectorySeparatorChar))
+                {
+                    current = current.AppendNext(Path.DirectorySeparatorChar);
+                }
+            }
+
+            return current;
+        }
+        #endregion
     }
 }

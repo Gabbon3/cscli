@@ -22,6 +22,9 @@ namespace plugins.eliminator
 
         [Option("drop-instant|di", "Se attivo cancella subito appena lo trova (ottimo in percorsi di rete)")]
         public bool DropInstant { get; set; }
+        
+        [Option("drop-source|ds", "Cancella al termine anche la cartella target")]
+        public bool DropSource { get; set; } = false;
 
         // --- OPZIONI CON VALORE ---
 
@@ -32,7 +35,7 @@ namespace plugins.eliminator
         public string? Pattern { get; set; }
 
         [Option("since|s", "Colpisce solo i file modificati da questa data in poi")]
-        public DateTime? Since { get; set; } // Adatta il tipo (string/int) in base a cosa si aspetta GetOptionAge
+        public DateTime? Since { get; set; }
 
         [Option("older-than|o", "Colpisce solo i file più vecchi di questa data/età")]
         public DateTime? OlderThan { get; set; }

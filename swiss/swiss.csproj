@@ -13,9 +13,10 @@
 		<TargetFramework>net9.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
 		<PublishAot>true</PublishAot>
-		<PublishDir>c:\tesisquare\tools</PublishDir>
+		<PublishDir>c:\users\g2004\desktop\tools</PublishDir>
 
 		<StripSymbols>true</StripSymbols>
 		<ConsoleFullSymbolStackTraces>false</ConsoleFullSymbolStackTraces>

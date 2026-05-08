@@ -15,8 +15,8 @@ using plugins.move;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 // info sulla versione
-const string version = "1.9.7";
-const string versionDescription = "Move Plugin";
+const string version = "1.9.8";
+const string versionDescription = "Ottimizzazioni varie";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -47,7 +47,7 @@ List<PluginRegistration> plugins = [
 // # --------------------------------- #
 if (args.Length == 0)
 {
-    ConsolePlus.Write("[Yellow][ ! ] Nessun comando inserito[/]\n[ i ] [Cyan]gg --help[/] oppure [Cyan]gg -h[/] per ottenere maggiori informazioni");
+    ConsolePlus.Write("[Yellow][ ! ] Nessun comando inserito[/]\n[ i ] [Cyan]swiss --help[/] oppure [Cyan]swiss -h[/] per ottenere maswissiori informazioni");
     //Help(plugins);
     return;
 }
