@@ -19,7 +19,12 @@ namespace lib.io.stack
         public long Length { get; }
         public bool IsDirectory { get; }
 
-        public StackFileInfo(ref FileSystemEntry entry)
+        /// <summary>
+        /// Inizializza un nuovo SatckFileInfo partendo da FileSystemEntry
+        /// </summary>
+        /// <param name="entry"></param>
+        /// <param name="nullCharAtEnd">se true inserisce come ultimo char di PathBuffer \0</param>
+        public StackFileInfo(ref FileSystemEntry entry, bool nullCharAtEnd = false)
         {
             CreationTime = entry.CreationTimeUtc.LocalDateTime;
             LastAccessTime = entry.LastAccessTimeUtc.LocalDateTime;
@@ -29,12 +34,21 @@ namespace lib.io.stack
 
             PathLength = entry.Directory.Length + 1 + entry.FileName.Length;
             NameLength = entry.FileName.Length;
-
+            // lascio uno spazietto per \0
+            if (nullCharAtEnd)
+            {
+                PathLength += 1;
+            }
             PathBuffer = ArrayPool<char>.Shared.Rent(PathLength);
 
             entry.Directory.CopyTo(PathBuffer);
             PathBuffer[entry.Directory.Length] = Path.DirectorySeparatorChar;
             entry.FileName.CopyTo(PathBuffer.AsSpan(entry.Directory.Length + 1));
+            // aggiungo \0 se richiesto
+            if (nullCharAtEnd)
+            {
+                PathBuffer[PathLength - 1] = '\0';
+            }
         }
 
         /// <summary>

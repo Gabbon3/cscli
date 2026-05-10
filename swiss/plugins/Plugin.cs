@@ -230,7 +230,7 @@ public abstract class Plugin
         // # Utilizzo
         // NOTA: uso [[ ]] per stampare le parentesi quadre letterali in Spectre
         string safeName = Markup.Escape(Name);
-        string usageLine = $"[yellow]gg[/] [blue]{safeName}[/]";
+        string usageLine = $"[yellow]swiss[/] [blue]{safeName}[/]";
 
         foreach (var fa in fixedArgs)
         {
@@ -241,6 +241,7 @@ public abstract class Plugin
         var usagePanel = new Panel(usageLine)
             .Header("[bold cyan] Uso [/]")
             .Border(BoxBorder.Rounded)
+            .BorderColor(Color.Gray)
             .Padding(2, 0, 2, 0);
 
         AnsiConsole.Write(usagePanel);

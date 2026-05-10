@@ -5,6 +5,8 @@ using lib.utils;
 using lib.console;
 using lib.io.stack;
 using Spectre.Console;
+using System.Buffers;
+using lib.io.collections;
 
 namespace plugins.eliminator
 {
@@ -13,8 +15,6 @@ namespace plugins.eliminator
         public override string Name => "eliminator";
         public override string Description => "Tool avanzato per la cancellazione e l'archiviazione massiva dei file";
 
-        private string GlobalTrashPath = "";
-        private string DriveRoot = "C:\\";
         // dimensione padding per prevenire false-sharing su BytesSavedList e DroppedFilesCountList
         private const int CounterStride = 8;
         // 
@@ -31,17 +31,20 @@ namespace plugins.eliminator
             public string TargetPath { get; set; } = "";
             public bool IsDebug { get; set; }
             public bool IsRecursive { get; set; }
+            public FileAttributes AttributesToSkip { get; set; }
             public bool DropInstant { get; set; }
             public int ThreadNumber { get; set; }
             public FileSystemFilter? FileFilter { get; set; }
 
             public Channel<StackFileInfo>? WorkChannel { get; set; }
+            public SpanArena<char>? DirectoryToRemove { get; set; }
             public long[] DroppedFilesCountList { get; set; } = [];
             public long[] BytesSavedList { get; set; } = [];
             public bool IsProcessing { get; set; } = true;
             public bool DropTargetPathAtEnd { get; set; } = false;
         }
 
+        #region RunAsync
         // # Esecuzione Principale
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
@@ -61,36 +64,34 @@ namespace plugins.eliminator
                 return;
             }
 
-            // 2. inizializzazione del percorso di trashing temporaneo
-            if (!InitializeTrashPath())
-            {
-                return;
-            }
-
             ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(State.IsDebug ? "(DEBUG)" : "")}");
 
             // 3. inizializzo il task di producer
-            var producerTask = CreateProducerTask(ct);
+            var producerTask = CreateProducerTask(settings, ct);
 
             // 4. inizializzo i task dei consumer (i workers veri e propri)
             var workers = CreateWorkerTasks(ct);
 
             // 5. inizializzo il task per il monitor UI
-            var monitorTask = CreateMonitorTask(ct);
+            Task? monitorTask = null;
+            if (!settings.Silence) monitorTask = CreateMonitorTask(ct);
 
             // avvio e attendo tutti i workers
             await Task.WhenAll(workers);
             State.IsProcessing = false;
-            await monitorTask;
+            if (!settings.Silence) await monitorTask!;
             await producerTask;
 
             // pulizia finale
+            ConsolePlus.Write($"[Green]#[/] Pulizia finale...");
             Cleanup();
 
             // 6. stampa statistiche finali
             PrintFinalStatistics();
         }
 
+        #endregion
+        #region parsing
         // # ---------------------------------- #
         // Parsing e validazione Settings
         // # ---------------------------------- #
@@ -108,8 +109,10 @@ namespace plugins.eliminator
             State.TargetPath = targetPath;
             State.IsDebug = settings.Debug;
             State.IsRecursive = settings.Recursive;
-            State.DropInstant = settings.DropInstant;
             State.ThreadNumber = settings.Threads ?? Environment.ProcessorCount;
+
+            State.AttributesToSkip = FileAttributes.System;
+            if (!settings.IncludeHidden) State.AttributesToSkip |= FileAttributes.Hidden;
 
             var filterOpts = new FileFilterFactory.FilterOptions(
                 Pattern: ParseMatchPattern(settings.Pattern),
@@ -130,45 +133,8 @@ namespace plugins.eliminator
             return true;
         }
 
-        // # ---------------------------------- #
-        // Inizializzazione Percorso di Trash
-        // # ---------------------------------- #
-
-        /// <summary>
-        /// Inizializza il percorso del cestino globale e crea la struttura di directory.
-        /// Accede a: State.TargetPath, State.DropInstant
-        /// Popola: GlobalTrashPath, DriveRoot
-        /// </summary>
-        private bool InitializeTrashPath()
-        {
-            DriveRoot = Path.GetPathRoot(Path.GetFullPath(State.TargetPath)) ?? "C:\\";
-            GlobalTrashPath = Path.Combine(DriveRoot, $".swiss_trash_{Guid.NewGuid()}");
-
-            if (State.DropInstant)
-                return true;
-
-            try
-            {
-                Directory.CreateDirectory(GlobalTrashPath);
-                return true;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                PrintError($"Non è possibile creare la cartella '{GlobalTrashPath}', non si dispone dei permessi necessari");
-                return false;
-            }
-            catch (IOException)
-            {
-                PrintError($"Errore I/O sul disco, non è stato possibile creare '{GlobalTrashPath}'");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                PrintError($"Non è stato possibile creare la cartella '{GlobalTrashPath}': {ex.Message}");
-                return false;
-            }
-        }
-
+        #endregion
+        #region producer
         // # ---------------------------------- #
         // Creazione Task del Producer
         // # ---------------------------------- #
@@ -177,34 +143,75 @@ namespace plugins.eliminator
         /// Crea il task che enumera i file dal file system e li invia al canale di lavoro.
         /// Accede a: State.TargetPath, State.IsDebug, State.IsRecursive, State.FileFilter, State.WorkChannel
         /// </summary>
-        private Task CreateProducerTask(CancellationToken ct)
+        private Task CreateProducerTask(EliminatorSettings settings, CancellationToken ct)
         {
-            State.WorkChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(50000)
+            State.WorkChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(8192)
             {
                 SingleWriter = true,
                 SingleReader = false
             });
 
+            State.DirectoryToRemove = new SpanArena<char>();
+
+            // calcolo la lunghezza della root per tagliare i percorsi relativi in sicurezza
+            int rootLength = State.TargetPath.Length;
+            if (!State.TargetPath.EndsWith(Path.DirectorySeparatorChar) && !State.TargetPath.EndsWith(Path.AltDirectorySeparatorChar))
+            {
+                rootLength++;
+            }
+
             var enumOptions = new EnumerationOptions
             {
                 IgnoreInaccessible = true,
                 RecurseSubdirectories = State.IsRecursive,
-                BufferSize = 64 * 1024
+                BufferSize = 64 * 1024,
+                AttributesToSkip = State.AttributesToSkip
             };
 
             IEnumerable<StackFileInfo> itemsToScan = new FileSystemEnumerable<StackFileInfo>(
                 State.TargetPath,
-                (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
+                (ref FileSystemEntry entry) => new StackFileInfo(ref entry, true), // null char nel path alla fine con true
                 enumOptions
             )
             {
                 ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
-                    if (entry.IsDirectory) return false;
-                    if (State.FileFilter != null)
+                    if (entry.IsDirectory)
                     {
-                        return State.FileFilter(ref entry);
+                        // pushamo la cartella nello stack subito
+                        ReadOnlySpan<char> dirSpan = entry.Directory;
+                        ReadOnlySpan<char> nameSpan = entry.FileName;
+
+                        // calcolo il percorso relativo
+                        if (dirSpan.Length >= rootLength || (dirSpan.Length == rootLength - 1))
+                        {
+                            ReadOnlySpan<char> relParent = dirSpan.Length > rootLength ? dirSpan[rootLength..] : [];
+
+                            // siamo nella root
+                            if (relParent.IsEmpty)
+                            {
+                                State.DirectoryToRemove.Push(nameSpan);
+                            }
+                            else
+                            {
+                                // unisco genitore relativo e nome corrente usando la memoria dello stack
+                                Span<char> tempPath = stackalloc char[relParent.Length + 1 + nameSpan.Length];
+                                relParent.CopyTo(tempPath);
+                                tempPath[relParent.Length] = Path.DirectorySeparatorChar;
+                                nameSpan.CopyTo(tempPath[(relParent.Length + 1)..]);
+
+                                State.DirectoryToRemove.Push(tempPath);
+                            }
+                        }
+                        return false; // non pushamo mai nel channel le directory
                     }
+
+                    // Filtraggio File
+                    if (State.FileFilter != null && !State.FileFilter(ref entry))
+                    {
+                        return false;
+                    }
+
                     return true;
                 }
             };
@@ -219,7 +226,7 @@ namespace plugins.eliminator
                         if (State.IsDebug)
                         {
                             ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
-                            item.Dispose();
+                            item.Dispose(); // in debug restituisco subito all'arraypool
                         }
                         else
                         {
@@ -236,6 +243,8 @@ namespace plugins.eliminator
             }, ct);
         }
 
+        #endregion
+        #region worker
         // # ---------------------------------- #
         // Creazione dei Task[] dei Workers
         // # ---------------------------------- #
@@ -254,16 +263,6 @@ namespace plugins.eliminator
                 int workerId = i;
                 workers[i] = Task.Run(async () =>
                 {
-                    List<Task> backgroundWorkerDrops = [];
-                    int batchId = 0;
-                    string workerRoot = Path.Combine(GlobalTrashPath, workerId.ToString());
-                    string currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
-
-                    if (!State.DropInstant)
-                    {
-                        Directory.CreateDirectory(workerRoot);
-                        Directory.CreateDirectory(currentBatchPath);
-                    }
 
                     long localFlushDropped = 0;
                     long localFlushBytes = 0;
@@ -274,23 +273,15 @@ namespace plugins.eliminator
                     {
                         await foreach (var item in State.WorkChannel!.Reader.ReadAllAsync())
                         {
-                            try
+                            using (item)
                             {
                                 totalDropped++;
                                 localFlushDropped++;
                                 localFlushBytes += item.Length;
 
-                                if (State.DropInstant)
-                                {
-                                    NativeIO.DeleteFile(item.GetFullPath());
-                                }
-                                else
-                                {
-                                    string destPath = $"{workerRoot}{Path.DirectorySeparatorChar}{totalDropped}.tmp";
-                                    File.Move(item.GetFullPath(), destPath);
-                                }
+                                NativeIO.DeleteFile(item.AsPathSpan());
 
-                                // ogni 512 elementi faccio il flush dell'array
+                                // flush dell'array
                                 if ((localFlushDropped & FlushMask) == 0)
                                 {
                                     State.DroppedFilesCountList[slot] += localFlushDropped;
@@ -298,33 +289,9 @@ namespace plugins.eliminator
 
                                     localFlushDropped = 0;
                                     localFlushBytes = 0;
-
                                 }
 
-                                // Ogni 4096 elementi, elimina il batch corrente
-                                // solo se non elimino subito i file
-                                if ((totalDropped & 4095) == 0)
-                                {
-                                    batchId++;
-                                    // gestisco le cartelle di batch solo se non sto eliminando direttamente i file
-                                    if (!State.DropInstant)
-                                    {
-                                        string folderToDrop = currentBatchPath;
-                                        backgroundWorkerDrops.Add(Task.Run(() =>
-                                        {
-                                            try { Directory.Delete(folderToDrop, true); }
-                                            catch { }
-                                        }));
-
-                                        currentBatchPath = Path.Combine(workerRoot, batchId.ToString());
-                                        Directory.CreateDirectory(currentBatchPath);
-                                    }
-                                }
                                 ct.ThrowIfCancellationRequested();
-                            }
-                            finally
-                            {
-                                item.Dispose();
                             }
                         }
                     }
@@ -333,14 +300,6 @@ namespace plugins.eliminator
                         // invio gli ultimi dati rimasti appesi
                         State.DroppedFilesCountList[slot] += localFlushDropped;
                         State.BytesSavedList[slot] += localFlushBytes;
-                        // attendo i task di cancellazione delle cartelle
-                        await Task.WhenAll(backgroundWorkerDrops);
-                        // se non stavo cancellando subito ed esiste al working directory allora la cancello
-                        if (!State.DropInstant && Directory.Exists(workerRoot))
-                        {
-                            try { Directory.Delete(workerRoot, true); }
-                            catch { }
-                        }
                     }
                 }, ct);
             }
@@ -348,6 +307,8 @@ namespace plugins.eliminator
             return workers;
         }
 
+        #endregion
+        #region monitor
         // # ---------------------------------- #
         // Creazione del Monitor UI
         // # ---------------------------------- #
@@ -381,7 +342,7 @@ namespace plugins.eliminator
 
                                 // 1. GRID DEI WORKER (Colonne fisse per allineamento perfetto)
                                 var workerGrid = new Grid()
-                                    .AddColumn(new GridColumn().Width(12).NoWrap()) // T-XX (B:XXX)
+                                    .AddColumn(new GridColumn().Width(4).NoWrap()) // T-XX
                                     .AddColumn(new GridColumn().Width(11).RightAligned().NoWrap()) // File eliminati max 999.999.999
                                     .AddColumn(new GridColumn().NoWrap().LeftAligned()); // Barra
 
@@ -393,13 +354,12 @@ namespace plugins.eliminator
                                     currentTotalDropped += totalDropped;
                                     currentTotalBytesSaved += totalBytes;
 
-                                    long currentBatch = totalDropped / 4096;
                                     long currentProgress = totalDropped % 4096;
                                     int dashesCount = (int)(currentProgress / 102);
                                     string bar = new string('-', dashesCount).PadRight(40, ' ');
 
                                     workerGrid.AddRow(
-                                        $"[yellow]T-{i:D2}[/] [grey](B:[white]{currentBatch,3}[/])[/]",
+                                        $"[yellow]T-{i:D2}[/]",
                                         $"[cyan]{totalDropped:N0}[/]",
                                         $"[grey]|[/][green]{bar}[/][grey]|[/]"
                                     );
@@ -436,6 +396,8 @@ namespace plugins.eliminator
             }, ct);
         }
 
+        #endregion
+        #region stats
         // # ---------------------------------- #
         // Stampa delle statistiche finali
         // # ---------------------------------- #
@@ -457,32 +419,63 @@ namespace plugins.eliminator
 
             ConsolePlus.WriteHr(25);
             ConsolePlus.Write($"[Cyan]#[/] Operazione Conclusa.");
-            ConsolePlus.Write($"[Cyan]*[/] File cancellati  : {totalDropped}");
-            ConsolePlus.Write($"[Cyan]*[/] Spazio coinvolto : {Formatter.Bytes(totalBytesSaved)}");
+            ConsolePlus.Write($"[Cyan]*[/] File cancellati  : [Magenta]{totalDropped}[/]");
+            ConsolePlus.Write($"[Cyan]*[/] Spazio coinvolto : [Cyan]{Formatter.Bytes(totalBytesSaved)}[/]");
             ConsolePlus.WriteHr(25);
         }
 
+        #endregion
+        #region cleanup
         // # ---------------------------------- #
         // Metodi secondari di Help
         // # ---------------------------------- #
 
         /// <summary>
-        /// Elimina la cartella del cestino temporaneo.
-        /// Dipende da: GlobalTrashPath
+        /// Elimina le cartelle presenti sullo stack e se richiesto anche la cartella sorgente
         /// </summary>
         private void Cleanup()
         {
-            if (Directory.Exists(GlobalTrashPath))
+            // 1. pulizia ricorsiva dell'albero
+            try
             {
-                ConsolePlus.Write($"[Red]#[/] Pulisco il cestino...");
-                try { Directory.Delete(GlobalTrashPath, true); }
-                catch { }
+                if (State.DirectoryToRemove != null && State.DirectoryToRemove.Count > 0)
+                {
+                    // affitto un buffer sufficientemente grande per i path
+                    char[] cleanBuffer = ArrayPool<char>.Shared.Rent(4096);
+                    try
+                    {
+                        while (State.DirectoryToRemove.TryPop(out ReadOnlySpan<char> relativeDir))
+                        {
+                            Span<char> workSpan = cleanBuffer.AsSpan();
+
+                            // ricostruisco il path: Root + Relativo
+                            Span<char> remaining = workSpan.PathCombine(State.TargetPath.AsSpan(), endWithSeparator: true);
+                            remaining = remaining.PathCombine(relativeDir, endWithSeparator: false);
+
+                            int finalLength = cleanBuffer.Length - remaining.Length;
+                            // aggiungo direttamente il nullchar per alleggerire NativeIO
+                            cleanBuffer[finalLength] = '\0';
+
+                            // provo a cancellare, se fallisce non importa vado oltre (sono rimasti file appesi che non sono passati al filtro).
+                            NativeIO.RemoveDirectory(cleanBuffer.AsSpan(0, finalLength + 1), throwOnError: false);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<char>.Shared.Return(cleanBuffer);
+                    }
+                }
             }
-            if (State.DropTargetPathAtEnd && Directory.Exists(State.TargetPath))
+            finally
             {
-                ConsolePlus.Write($"[Red]#[/] Rimuovo {State.TargetPath}...");
-                try { Directory.Delete(State.TargetPath, true); }
-                catch { }
+                // 2. restituisco il buffer dell'arena
+                State.DirectoryToRemove!.Dispose();
+            }
+            // 3. rimozione cartella radice
+            if (State.DropTargetPathAtEnd)
+            {
+                ConsolePlus.Write($"[Red]#[/] Rimuovo cartella sorgente [Yellow]{State.TargetPath}[/]...");
+                NativeIO.RemoveDirectory(State.TargetPath, throwOnError: false);
             }
         }
 
@@ -490,5 +483,6 @@ namespace plugins.eliminator
         {
             PrintHelp<EliminatorSettings>();
         }
+        #endregion
     }
 }

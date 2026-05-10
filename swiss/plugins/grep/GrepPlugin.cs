@@ -481,14 +481,7 @@ namespace plugins.grep
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int CountLines(ReadOnlySpan<byte> span)
         {
-            int count = 0;
-            int index;
-            while ((index = span.IndexOf((byte)'\n')) != -1)
-            {
-                count++;
-                span = span[(index + 1)..];
-            }
-            return count;
+            return span.Count((byte)'\n');
         }
 
         public override void Help() => PrintHelp<GrepSettings>();

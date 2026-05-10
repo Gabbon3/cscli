@@ -12,6 +12,9 @@ namespace plugins.count
         [Option("directory|d", "Include anche le cartelle nel conteggio finale")]
         public bool IncludeDirectory { get; set; }
 
+        [Option("hidden|H", "Includi file e cartelle nascoste nella ricerca")]
+        public bool IncludeHidden { get; set; } = false;
+
         [Option("recursive|r", "Scansiona e conta anche nelle sottocartelle")]
         public bool Recursive { get; set; }
 

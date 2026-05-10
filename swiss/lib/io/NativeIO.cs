@@ -1,4 +1,3 @@
-using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -14,13 +13,13 @@ namespace lib.io;
 public static class NativeIO
 {
     // --- Costanti per CreateFileW ---
-    private const uint GENERIC_WRITE         = 0x40000000;
-    private const uint OPEN_ALWAYS           = 4;
+    private const uint GENERIC_WRITE = 0x40000000;
+    private const uint OPEN_ALWAYS = 4;
     private const uint FILE_ATTRIBUTE_NORMAL = 0x80;
 
     // --- Costanti per MoveFileExW ---
     private const uint MOVEFILE_REPLACE_EXISTING = 0x00000001;
-    private const uint MOVEFILE_COPY_ALLOWED     = 0x00000002;
+    private const uint MOVEFILE_COPY_ALLOWED = 0x00000002;
 
     // --- Import delle API native (char* per zero allocazioni) ---
 
@@ -31,6 +30,10 @@ public static class NativeIO
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern unsafe bool CreateDirectoryW(char* lpPathName, IntPtr lpSecurityAttributes);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern unsafe bool RemoveDirectoryW(char* lpPathName);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern unsafe SafeFileHandle CreateFileW(
@@ -94,6 +97,58 @@ public static class NativeIO
     /// <inheritdoc cref="DeleteFile(ReadOnlySpan{char})"/>
     public static bool DeleteFile(string filePath)
         => DeleteFile(filePath.AsSpan());
+
+    /// <summary>
+    /// Rimuove una directory vuota dal disco.
+    /// Zero allocazioni GC se <paramref name="path"/> termina già con '\0'.
+    /// </summary>
+    /// <param name="path">Percorso della directory da rimuovere.</param>
+    /// <param name="throwOnError">se true, lancia NativeIOException in caso di errori</param>
+    /// <returns>true se la directory è stata rimossa con successo.</returns>
+    /// <exception cref="NativeIOException">
+    /// Lanciata quando:
+    /// - ERROR_FILE_NOT_FOUND (2): La directory non esiste.
+    /// - ERROR_PATH_NOT_FOUND (3): Percorso non valido.
+    /// - ERROR_ACCESS_DENIED (5): Permessi insufficienti o directory in uso.
+    /// - ERROR_DIR_NOT_EMPTY (145): La directory contiene ancora file o sottodirectory.
+    /// </exception>
+    public static unsafe bool RemoveDirectory(ReadOnlySpan<char> path, bool throwOnError = true)
+    {
+        char[]? rented = null;
+        try
+        {
+            ReadOnlySpan<char> span;
+            if (path.Length > 0 && path[^1] == '\0')
+            {
+                span = path;
+            }
+            else
+            {
+                rented = ArrayPool<char>.Shared.Rent(path.Length + 1);
+                path.CopyTo(rented);
+                rented[path.Length] = '\0';
+                span = rented.AsSpan(0, path.Length + 1);
+            }
+
+            fixed (char* ptr = span)
+            {
+                bool result = RemoveDirectoryW(ptr);
+                if (!result && throwOnError)
+                {
+                    ThrowNativeError(Marshal.GetLastWin32Error(), path, default, "rimozione directory");
+                }
+                return result;
+            }
+        }
+        finally
+        {
+            if (rented != null) ArrayPool<char>.Shared.Return(rented);
+        }
+    }
+
+    /// <inheritdoc cref="RemoveDirectory(ReadOnlySpan{char})"/>
+    public static bool RemoveDirectory(string path)
+        => RemoveDirectory(path.AsSpan());
 
     /// <summary>
     /// Crea una directory. Se la directory esiste già, l'operazione viene considerata un successo.
@@ -273,7 +328,7 @@ public static class NativeIO
     public static bool Move(string sourcePath, string destinationPath, bool overwrite = true)
         => Move(sourcePath.AsSpan(), destinationPath.AsSpan(), overwrite);
 
-    // --- Helper errori (NoInlining per permettere al JIT di inlinare i metodi caldi) ---
+    // --- Helper errori (NoInlining per permettere al JIT di inlinare tutto) ---
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowNativeError(int errorCode, ReadOnlySpan<char> path1, ReadOnlySpan<char> path2, string operation)
@@ -287,12 +342,13 @@ public static class NativeIO
 
         throw errorCode switch
         {
-            2   => new NativeIOException($"File non trovato durante l'{operation}: '{p1}'", errorCode, "ERROR_FILE_NOT_FOUND"),
-            3   => new NativeIOException($"Percorso non trovato durante l'{operation}: '{p1}'{(p2.Length > 0 ? $" -> '{p2}'" : "")}", errorCode, "ERROR_PATH_NOT_FOUND"),
-            5   => new NativeIOException($"Accesso negato durante l'{operation} di '{p1}'.", errorCode, "ERROR_ACCESS_DENIED"),
-            87  => new NativeIOException($"Parametri non validi durante l'{operation} di '{p1}'.", errorCode, "ERROR_INVALID_PARAMETER"),
+            2 => new NativeIOException($"File non trovato durante l'{operation}: '{p1}'", errorCode, "ERROR_FILE_NOT_FOUND"),
+            3 => new NativeIOException($"Percorso non trovato durante l'{operation}: '{p1}'{(p2.Length > 0 ? $" -> '{p2}'" : "")}", errorCode, "ERROR_PATH_NOT_FOUND"),
+            5 => new NativeIOException($"Accesso negato durante l'{operation} di '{p1}'.", errorCode, "ERROR_ACCESS_DENIED"),
+            87 => new NativeIOException($"Parametri non validi durante l'{operation} di '{p1}'.", errorCode, "ERROR_INVALID_PARAMETER"),
             183 => new NativeIOException($"Il file di destinazione esiste già: '{p2}'.", errorCode, "ERROR_ALREADY_EXISTS"),
-            _   => new NativeIOException($"Errore {errorCode} durante l'{operation} di '{p1}'.", errorCode, "UNKNOWN_ERROR")
+            145 => new NativeIOException($"La directory non è vuota: '{p1}'.", errorCode, "ERROR_DIR_NOT_EMPTY"),
+            _ => new NativeIOException($"Errore {errorCode} durante l'{operation} di '{p1}'.", errorCode, "UNKNOWN_ERROR")
         };
     }
 }

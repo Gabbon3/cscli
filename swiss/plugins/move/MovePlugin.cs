@@ -43,6 +43,7 @@ namespace plugins.move
             public bool IsDebug { get; set; }
             public bool IsRecursive { get; set; }
             public bool Overwrite { get; set; }
+            public FileAttributes AttributesToSkip { get; set; }
             public int ConsumerCount { get; set; }
             public FileSystemFilter? FileFilter { get; set; }
 
@@ -147,6 +148,10 @@ namespace plugins.move
             State.IsRecursive = settings.Recursive;
             State.Overwrite = settings.Overwrite;
 
+            State.AttributesToSkip = FileAttributes.System;
+            if (!settings.IncludeHidden) State.AttributesToSkip |= FileAttributes.Hidden;
+
+
             // Calcolo della distribuzione thread: 1/4 producer, 3/4 consumer
             // Nel caso non-recursive: 1 producer, tutti gli altri consumer
             int totalThreads = settings.Threads ?? Environment.ProcessorCount;
@@ -192,7 +197,7 @@ namespace plugins.move
         {
             // Canale dei file limitato per backpressure: evita che i producer spediscano
             // troppi file contemporaneamente se i consumer sono lenti
-            State.FileChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(50000)
+            State.FileChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(8192)
             {
                 SingleWriter = false,
                 SingleReader = false,
@@ -236,7 +241,8 @@ namespace plugins.move
                     IgnoreInaccessible = true,
                     // Lasciamo che sia .NET a gestire la ricorsione in C++ nativo (molto più veloce)
                     RecurseSubdirectories = State.IsRecursive,
-                    BufferSize = 64 * 1024
+                    BufferSize = 64 * 1024,
+                    AttributesToSkip = State.AttributesToSkip
                 };
 
                 var entries = new FileSystemEnumerable<StackFileInfo>(

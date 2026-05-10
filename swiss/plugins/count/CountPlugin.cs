@@ -56,6 +56,9 @@ namespace plugins.count
             }
 
             // configurazione walker
+            FileAttributes attributesToSkip = FileAttributes.System;
+            if (!settings.IncludeHidden) attributesToSkip |= FileAttributes.Hidden;
+
             var fastWalkerOptions = new FastWalkerOptions
             {
                 IgnoreInaccessible = true,
@@ -63,7 +66,8 @@ namespace plugins.count
                 BufferSize = 64 * 1024,
                 ReturnDirectoriesInOutput = settings.IncludeDirectory,
                 Filter = fileFilter,
-                SingleReader = true
+                SingleReader = true,
+                AttributesToSkip = attributesToSkip
             };
 
             var walkerReader = FastWalker.Walk<CountEntry>(

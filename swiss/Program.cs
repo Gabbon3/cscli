@@ -23,9 +23,7 @@ using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (sender, e) =>
 {
     e.Cancel = true;
-    Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.WriteLine("\nRichiesta di annullamento ricevuta (Ctrl+C)...");
-    Console.ResetColor();
+    ConsolePlus.Write("\n[Yellow]Richiesta di annullamento ricevuta (Ctrl+C)...[/]");
     // invio del segnale di stop del processo in maniera safe
     cts.Cancel();
 };

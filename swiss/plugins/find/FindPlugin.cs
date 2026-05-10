@@ -192,10 +192,19 @@ namespace plugins.find
                 ct
             );
 
-            await foreach (var item in walkerReader.ReadAllAsync(ct))
+            try
             {
-                State.MatchCount++;
-                State.ProcessItemStrategy!(item);
+                await foreach (var item in walkerReader.ReadAllAsync(ct))
+                {
+                    State.MatchCount++;
+                    State.ProcessItemStrategy!(item);
+                    ct.ThrowIfCancellationRequested();
+                }
+            }
+            catch (OperationCanceledException) { /* Operazione fermata manualmente */ }
+            catch (Exception)
+            {
+                throw;
             }
         }
 

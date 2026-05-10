@@ -20,11 +20,14 @@ namespace plugins.eliminator
         [Option("ignore-case|i", "Rende la ricerca case-insensitive")]
         public bool IgnoreCase { get; set; }
 
-        [Option("drop-instant|di", "Se attivo cancella subito appena lo trova (ottimo in percorsi di rete)")]
-        public bool DropInstant { get; set; }
+        [Option("hidden|H", "Includi file e cartelle nascoste nella ricerca")]
+        public bool IncludeHidden { get; set; } = false;
         
         [Option("drop-source|ds", "Cancella al termine anche la cartella target")]
         public bool DropSource { get; set; } = false;
+
+        [Option("silence|s", "Non mostrare la UI di progressione a video")]
+        public bool Silence { get; set; }
 
         // --- OPZIONI CON VALORE ---
 
