@@ -545,7 +545,7 @@ namespace plugins.mdconverter
         private string GetEmbeddedCss()
         {
             var assembly = typeof(MdConverterPlugin).Assembly;
-            string resourceName = "gg.plugins.mdconverter.assets.md.min.css";
+            string resourceName = "swiss.plugins.mdconverter.assets.md.min.css";
             using Stream stream = assembly.GetManifestResourceStream(resourceName)!;
             using StreamReader reader = new(stream);
             return reader.ReadToEnd();

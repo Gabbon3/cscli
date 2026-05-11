@@ -1,10 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<Version>1.8.8</Version>
+		<Version>1.9.8</Version>
 		<Authors>Gabbon3</Authors>
 		<Company>Torino</Company>
-		<Product>GgCLI</Product>
+		<Product>SwissCLI</Product>
 		<Description>CLI general purpose</Description>
 	</PropertyGroup>
 
@@ -16,7 +16,7 @@
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
 		<PublishAot>true</PublishAot>
-		<PublishDir>c:\users\g2004\desktop\tools</PublishDir>
+		<PublishDir>c:\tesisquare\tools</PublishDir>
 
 		<StripSymbols>true</StripSymbols>
 		<ConsoleFullSymbolStackTraces>false</ConsoleFullSymbolStackTraces>
@@ -32,17 +32,17 @@
 	</ItemGroup>
 
 	<Target Name="CompileSass" BeforeTargets="BeforeBuild;PrepareForBuild">
-		<Message Importance="high" Text="[Gg] Compilazione Sass in corso..." />
+		<Message Importance="high" Text="[Swiss] Compilazione Sass in corso..." />
 		<Exec Command="sass plugins\mdconverter\assets\md.scss:plugins\mdconverter\assets\md.min.css --style compressed --no-source-map" />
 	</Target>
 
 	<Target Name="PublishRelease">
 		<CallTarget Targets="CompileSass" />
-		<Message Importance="high" Text="[Gg] Avvio Pubblicazione Native AOT in corso..." />
+		<Message Importance="high" Text="[Swiss] Avvio Pubblicazione Native AOT in corso..." />
 
 		<Exec Command="dotnet publish -c Release -r win-x64 --self-contained true --nologo -v:m -p:WarningLevel=0 -clp:NoSummary" />
 
-		<Message Importance="high" Text="[Gg] Missile AOT pronto in: $(PublishDir)" />
+		<Message Importance="high" Text="[Swiss] Missile AOT pronto in: $(PublishDir)" />
 	</Target>
 
 	<ItemGroup>
