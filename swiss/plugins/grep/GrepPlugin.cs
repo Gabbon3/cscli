@@ -2,8 +2,9 @@ using System.IO.Enumeration;
 using System.Threading.Channels;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
-using lib.console;
 using System.Runtime.CompilerServices;
+using lib.console;
+using lib.console.fastprinter;
 using lib.algorithm;
 using lib.utils;
 using System.Buffers;
@@ -23,10 +24,12 @@ namespace plugins.grep
         private int LongestPattern = 0;
         private int[] PatternLengths = [];
         private bool IgnoreCase = false;
+        private bool Silence;
         private bool CountOnly = false;
         private int MinMatchCount = 0;
+        private int MaxMatchCount = -1;
         private AhoCorasick? AhoEngine;
-        private FastPrinter _fastPrinter = new();
+        private FastPrinter? _fastPrinter;
         private static readonly int MaxContextSize = 50;
         private static readonly int FilesChannelBound = 8192;
         private long TotalMatchCount = 0;
@@ -34,6 +37,8 @@ namespace plugins.grep
         private long TotalFileVisited = 0;
         // numero di byte da affittare per i vari print dei path per fastprinter
         private const int PathRentBytes = 2048;
+
+        #region Structs
 
         private static readonly HashSet<string> DefaultExcludeDirs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -109,9 +114,12 @@ namespace plugins.grep
                 // footer
                 "\n[DarkGray]*\n*[/]".AsSpan().AppendTo(outputSpan, ref matchLength);
 
-                _printer.TryPost(memoryOwner, matchLength);
+                _printer.Post(memoryOwner, matchLength);
             }
         }
+
+        #endregion
+        #region RunAsync
 
         // # ------------------------------ #
         // RunAsync — diagramma di flusso
@@ -139,7 +147,7 @@ namespace plugins.grep
             try
             {
                 // 6. avvio il task per il print a console multithread
-                _fastPrinter.Run(ct);
+                _fastPrinter!.Run(ct);
                 // 7. avvio i task di producer e consumers
                 var producerTask = RunProducerAsync(settings, ct);
                 var workerTasks = StartWorkers(settings, ct);
@@ -150,16 +158,21 @@ namespace plugins.grep
             catch (OperationCanceledException) { /* Uscita pulita dall'esecuzione */ }
             finally
             {
-                await _fastPrinter.Complete();
+                await _fastPrinter!.Complete();
             }
             // 9. termine
-            ConsolePlus.Write($"[Cyan]#[/] Ricerca completata:");
-            ConsolePlus.Write($"[Cyan]#[/] Match totali: [Green]{TotalMatchCount:N0}[/]");
-            ConsolePlus.Write($"[Cyan]#[/] File totali controllati: [Magenta]{TotalFileVisited:N0}[/]");
-            ConsolePlus.Write($"[Cyan]#[/] Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]");
-            ConsolePlus.WriteHr();
+            if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
+            ConsolePlus.WriteBoxHeader($"Ricerca completata", 40);
+            ConsolePlus.WriteList([
+                $"Match totali: [Green]{TotalMatchCount:N0}[/]",
+                $"File totali controllati: [Magenta]{TotalFileVisited:N0}[/]",
+                $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]"
+            ]);
+            ConsolePlus.WriteHr(40);
         }
 
+        #endregion
+        #region Settings
         // # ------------------------------ #
         // Metodi principali
         // # ------------------------------ #
@@ -189,13 +202,62 @@ namespace plugins.grep
                 return false;
             }
 
+            // # destinazione output fast-printer
+            IFastOutput printerOutput = ConsoleOutput.Instance;
+            bool hasOutputFile = !string.IsNullOrWhiteSpace(settings.OutputFile);
+            // se è stato richiesto il file di output
+            if (hasOutputFile)
+            {
+                // creo il file di output sovrascrivendo quello precedente
+                var fileOutput = new FileOutput(settings.OutputFile!);
+
+                if (settings.Silence)
+                {
+                    // Silenzioso ma con file
+                    printerOutput = fileOutput;
+                }
+                else
+                {
+                    // Normale con file: scrive SIA su console SIA su file
+                    printerOutput = new CompositeOutput(ConsoleOutput.Instance, fileOutput);
+                }
+            }
+            else if (settings.Silence)
+            {
+                // Silenzio radio: i dati vengono droppati
+                printerOutput = NullOutput.Instance;
+            }
+
+            // # inizializzo fastprinter
+            var fastPrinterOptions = new FastPrinter.FastPrinterOptions(
+                output: printerOutput,
+                capacity: 10_000);
+
+            _fastPrinter = new FastPrinter(fastPrinterOptions);
+
+            // # state globale
             State.Root = root;
+
+
+            MinMatchCount = settings.MinCount > 0 ? settings.MinCount : 1;
+            MaxMatchCount = settings.MaxCount > 0 ? settings.MaxCount : -1;
+            if (MaxMatchCount > 0 && MaxMatchCount < MinMatchCount)
+            {
+                PrintError("Parametri non validi, --max-count non puo essere minore di --min-count");
+                return false;
+            }
+
             CountOnly = settings.Count;
-            MinMatchCount = settings.MinCount;
             IgnoreCase = settings.IgnoreCase;
+
+            // Salviamo il flag Silence se ti serve in ProcessFile per usare l'overload veloce
+            Silence = settings.Silence;
+
             return true;
         }
 
+        #endregion
+        #region Pattern
         /// <summary>
         /// Splitta il pattern su '|', calcola LongestPattern, PatternLengths e State.PatternList.
         /// Accede a: State.WordsToSearch, State.PatternList, LongestPattern, PatternLengths, IgnoreCase
@@ -219,6 +281,8 @@ namespace plugins.grep
             }
         }
 
+        #endregion
+        #region Filters
         /// <summary>
         /// Costruisce State.ExcludeDirs partendo da DefaultExcludeDirs,
         /// aggiungendo le escluse e rimuovendo le incluse da settings.
@@ -244,7 +308,8 @@ namespace plugins.grep
                 }
             }
         }
-
+        #endregion
+        #region Engine
         /// <summary>
         /// Inizializza AhoEngine e State.FilesChannel.
         /// Accede a: AhoEngine, State.PatternList, State.FilesChannel
@@ -260,6 +325,8 @@ namespace plugins.grep
             });
         }
 
+        #endregion
+        #region Producer
         /// <summary>
         /// Enumera i file nel filesystem e li scrive su State.FilesChannel.
         /// Accede a: State.Root, State.ExcludeDirs, State.IncludeGlobs, State.FilesChannel
@@ -320,6 +387,8 @@ namespace plugins.grep
             }
         }
 
+        #endregion
+        #region Workers
         /// <summary>
         /// Avvia un task worker per ogni core disponibile e li restituisce.
         /// Accede a: State.FilesChannel, AhoEngine, LongestPattern, PatternLengths, IgnoreCase, _fastPrinter
@@ -356,7 +425,8 @@ namespace plugins.grep
         // # ------------------------------ #
         // Metodi di elaborazione
         // # ------------------------------ #
-
+        #endregion
+        #region ProcessFile
         /// <summary>
         /// Processa un file cercando il pattern con AhoCorasick a blocchi da 64 KB.
         /// Accede a: AhoEngine, PatternLengths, IgnoreCase, _fastPrinter
@@ -411,7 +481,7 @@ namespace plugins.grep
                     }
                     else // altrimenti uso match handler per poi stampare a video il contesto
                     {
-                        var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter);
+                        var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter!);
                         matchCount += AhoEngine!.Search(searchSpan, ref handler);
                     }
 
@@ -437,13 +507,25 @@ namespace plugins.grep
                 handle?.Dispose();
             }
             // # Se solo conteggio stampo il match con il percorso del file e il numero di match trovati
-            if (CountOnly && matchCount >= MinMatchCount)
+            if (CountOnly)
             {
-                PrintCountResult(path, matchCount);
+                // verifico il limite inferiore
+                bool satisfiesMin = matchCount >= MinMatchCount;
+                // verifico il limite superiore (solo se non è -1)
+                bool satisfiesMax = MaxMatchCount == -1 || matchCount <= MaxMatchCount;
+                if (satisfiesMin && satisfiesMax)
+                {
+                    PrintCountResult(path, matchCount);
+                }
+                else
+                {
+                    matchCount = 0;
+                }
             }
             return matchCount;
         }
-
+        #endregion
+        #region Extract
         /// <summary>
         /// Restituisce la stringa con i colori applicati attorno al match trovato.
         /// </summary>
@@ -494,6 +576,8 @@ namespace plugins.grep
             return pos;
         }
 
+        #endregion
+        #region Other
         /// <summary>
         /// Stampa a console il conteggio delle occorrenze di un file usando il MemoryPool.
         /// Viene chiamato solo in modalità CountOnly.
@@ -522,10 +606,10 @@ namespace plugins.grep
                 matchLength += charsWritten;
             }
 
-            " match[/]\n".AsSpan().AppendTo(outputSpan, ref matchLength);
-            
+            " match[/]".AsSpan().AppendTo(outputSpan, ref matchLength);
+
             // # invio a fastprinter per la stampa
-            _fastPrinter.TryPost(memoryOwner, matchLength);
+            _fastPrinter!.Post(memoryOwner, matchLength);
         }
 
         /// <summary>
@@ -539,4 +623,5 @@ namespace plugins.grep
 
         public override void Help() => PrintHelp<GrepSettings>();
     }
+    #endregion
 }

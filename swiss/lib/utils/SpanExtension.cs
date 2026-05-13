@@ -122,6 +122,20 @@ namespace lib.utils
             // Restituisce lo span "tagliando" il carattere appena scritto
             return destination[1..];
         }
+
+        /// <summary>
+        /// Riempi una porzione di spazio con un carattere definito
+        /// </summary>
+        /// <param name="destination"></param>
+        /// <param name="c">carattere per il fill</param>
+        /// <param name="count"></param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Span<char> FillNext(this Span<char> destination, char c, int count)
+        {
+            destination[..count].Fill(c);
+            return destination[count..];
+        }
         #endregion
         #region path
         /// <summary>

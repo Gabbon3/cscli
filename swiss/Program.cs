@@ -20,7 +20,7 @@ AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
 const string version = "1.9.9";
-const string versionDescription = "Console encoding";
+const string versionDescription = "Refactoring Grep e Console";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -165,10 +165,12 @@ static void Help(List<PluginRegistration> plugins)
 
 static void VersionInfo()
 {
-    ConsolePlus.WriteHr();
-    ConsolePlus.Write($"[Cyan]#[/] [Green]{version}[/] - {versionDescription}");
-    ConsolePlus.Write($"[Cyan]#[/] Author: [Green]{author}");
-    ConsolePlus.WriteHr();
+    string versionAndDescription = $"[Cyan]*[/] [Green]{version}[/] - {versionDescription}";
+    int lineLength = versionAndDescription.Length - 18;
+    ConsolePlus.WriteHr(lineLength);
+    ConsolePlus.Write(versionAndDescription);
+    ConsolePlus.Write($"[Cyan]*[/] Author: [Green]{author}");
+    ConsolePlus.WriteHr(lineLength);
 }
 
 static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryBytes, long gcMemoryDiff)
@@ -176,29 +178,15 @@ static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryB
     double cpuRatio = elapsed.TotalMilliseconds > 0 ? cpuTime.TotalMilliseconds / elapsed.TotalMilliseconds : 0;
     string sign = gcMemoryDiff >= 0 ? "+" : "";
 
-    // 1. Creiamo una griglia per allineare i dati in due colonne
-    var grid = new Grid()
-        .AddColumn(new GridColumn().NoWrap().PadRight(4)) // Colonna Etichette
-        .AddColumn(new GridColumn().NoWrap());            // Colonna Valori
-
-    // 2. Aggiungiamo i dati riga per riga
-    grid.AddRow("[cyan]Tempo Totale:[/]", $"[cyan]{elapsed.TotalSeconds:N4} s[/]");
-    grid.AddRow("[cyan]Tempo CPU:[/]", $"[yellow]{cpuTime.TotalSeconds:N4} s[/] [grey](avg {cpuRatio:N1}x core)[/]");
-    grid.AddRow("[cyan]RAM Picco (Phys):[/]", $"[magenta]{peakMemoryBytes / 1024.0 / 1024.0:N2} MB[/]");
-    grid.AddRow("[cyan]GC Alloc (Delta):[/]", $"[grey]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]");
-
-    // 3. Avvolgiamo la griglia in un pannello decorato
-    var panel = new Panel(grid)
-        .Header("[bold cyan]Statistiche di Esecuzione[/]")
-        .Border(BoxBorder.Ascii)
-        .BorderColor(Color.DarkCyan)
-        .Padding(2, 0, 2, 0);
-
-    // Aggiungiamo uno spazio vuoto prima del pannello per distanziarlo dall'output del plugin
-    AnsiConsole.WriteLine();
-    
-    // Stampiamo il capolavoro
-    AnsiConsole.Write(panel);
+    Console.WriteLine();
+    ConsolePlus.WriteBoxHeader("Statistiche".AsSpan(), 40, ConsoleColor.Green);
+    ConsolePlus.WriteList([
+        $"Tempo Totale: [Cyan]{elapsed.TotalSeconds:N4} s[/]", 
+        $"Tempo CPU: [Yellow]{cpuTime.TotalSeconds:N4} s[/] [DarkGray](avg {cpuRatio:N1}x core)[/]", 
+        $"RAM Picco (Phys): [Magenta]{peakMemoryBytes / 1024.0 / 1024.0:N2} MB[/]", 
+        $"GC Alloc (Delta): [DarkGray]{sign}{gcMemoryDiff / 1024.0 / 1024.0:N4} MB[/]"]
+    , 0, '*', 2);
+    ConsolePlus.WriteHr(40);
 }
 // # -------------------------- #
 // dotnet build /t:PublishRelease
