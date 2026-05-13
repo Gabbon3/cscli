@@ -13,7 +13,13 @@ namespace plugins.grep
         [Option("ignore-case|i", "Ricerca case insensitive (ASCII)")]
         public bool IgnoreCase { get; set; }
 
+        [Option("count|c", "Restituisce il numero di match per ogni file")]
+        public bool Count { get; set; }
+
         // --- OPZIONI CON VALORE (Liste separate da virgola) ---
+        [Option("min-count|mc", "Se --count attivo, mostra i risultati solo se trova almeno min-count match")]
+        public int MinCount { get; set; } = 0;
+        
         [Option("threads|t", "Numero di thread da usare per la ricerca (default: numero di core)")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 

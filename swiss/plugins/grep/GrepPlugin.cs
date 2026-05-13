@@ -23,6 +23,8 @@ namespace plugins.grep
         private int LongestPattern = 0;
         private int[] PatternLengths = [];
         private bool IgnoreCase = false;
+        private bool CountOnly = false;
+        private int MinMatchCount = 0;
         private AhoCorasick? AhoEngine;
         private FastPrinter _fastPrinter = new();
         private static readonly int MaxContextSize = 50;
@@ -30,6 +32,8 @@ namespace plugins.grep
         private long TotalMatchCount = 0;
         private long TotalSizeVisited = 0;
         private long TotalFileVisited = 0;
+        // numero di byte da affittare per i vari print dei path per fastprinter
+        private const int PathRentBytes = 2048;
 
         private static readonly HashSet<string> DefaultExcludeDirs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -73,7 +77,7 @@ namespace plugins.grep
                 int patternLength = _patternLengths[patternIndex];
                 ReadOnlySpan<byte> originalDataSpan = _buffer.AsSpan(0, _currentDataLength);
                 // affitto lo spazio per costruire la stringa di output
-                IMemoryOwner<char> memoryOwner = MemoryPool<char>.Shared.Rent(2048);
+                IMemoryOwner<char> memoryOwner = MemoryPool<char>.Shared.Rent(PathRentBytes);
                 Span<char> outputSpan = memoryOwner.Memory.Span;
                 int matchLength = 0;
 
@@ -186,6 +190,8 @@ namespace plugins.grep
             }
 
             State.Root = root;
+            CountOnly = settings.Count;
+            MinMatchCount = settings.MinCount;
             IgnoreCase = settings.IgnoreCase;
             return true;
         }
@@ -360,11 +366,11 @@ namespace plugins.grep
             SafeFileHandle? handle = null;
             long matchCount = 0;
             try
-            { 
+            {
                 handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
                 long fileLength = RandomAccess.GetLength(handle);
                 if (fileLength == 0) return 0;
- 
+
                 long fileOffset = 0;
                 int leftover = 0;
                 int totalLines = 1;
@@ -397,9 +403,17 @@ namespace plugins.grep
                     {
                         searchSpan = dataSpan;
                     }
-
-                    var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter);
-                    matchCount += AhoEngine!.Search(searchSpan, ref handler);
+                    // # Avvio il motore AhoCorasick
+                    // se devo solo contare uso l'overload specifico per contare e basta
+                    if (CountOnly)
+                    {
+                        matchCount += AhoEngine!.Search(searchSpan);
+                    }
+                    else // altrimenti uso match handler per poi stampare a video il contesto
+                    {
+                        var handler = new AhoMatchHandler(path, buffer, currentDataLength, totalLines, PatternLengths, _fastPrinter);
+                        matchCount += AhoEngine!.Search(searchSpan, ref handler);
+                    }
 
                     if (currentDataLength > overlap)
                     {
@@ -421,6 +435,11 @@ namespace plugins.grep
             finally
             {
                 handle?.Dispose();
+            }
+            // # Se solo conteggio stampo il match con il percorso del file e il numero di match trovati
+            if (CountOnly && matchCount >= MinMatchCount)
+            {
+                PrintCountResult(path, matchCount);
             }
             return matchCount;
         }
@@ -473,6 +492,40 @@ namespace plugins.grep
             // copio il buffer finale nell'output
             buffer[..pos].CopyTo(output);
             return pos;
+        }
+
+        /// <summary>
+        /// Stampa a console il conteggio delle occorrenze di un file usando il MemoryPool.
+        /// Viene chiamato solo in modalità CountOnly.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void PrintCountResult(string path, long fileMatchCount)
+        {
+            // Affittiamo spazio per stampare il percorso
+            IMemoryOwner<char> memoryOwner = MemoryPool<char>.Shared.Rent(PathRentBytes);
+            Span<char> outputSpan = memoryOwner.Memory.Span;
+            int matchLength = 0;
+
+            ReadOnlySpan<char> pathSpan = path.AsSpan();
+
+            // # Costruzione path no allocazioni
+            "[Green]#[/] [DarkGray]".AsSpan().AppendTo(outputSpan, ref matchLength);
+            Path.GetDirectoryName(pathSpan).AppendTo(outputSpan, ref matchLength);
+            Path.DirectorySeparatorChar.AppendTo(outputSpan, ref matchLength);
+            "[Cyan]".AsSpan().AppendTo(outputSpan, ref matchLength);
+            Path.GetFileName(pathSpan).AppendTo(outputSpan, ref matchLength);
+            "[/]: [Magenta]".AsSpan().AppendTo(outputSpan, ref matchLength);
+
+            // # formattazione
+            if (fileMatchCount.TryFormat(outputSpan[matchLength..], out int charsWritten))
+            {
+                matchLength += charsWritten;
+            }
+
+            " match[/]\n".AsSpan().AppendTo(outputSpan, ref matchLength);
+            
+            // # invio a fastprinter per la stampa
+            _fastPrinter.TryPost(memoryOwner, matchLength);
         }
 
         /// <summary>

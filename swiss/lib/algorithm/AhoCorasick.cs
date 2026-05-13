@@ -264,6 +264,40 @@ public sealed class AhoCorasick
         return matchCount;
     }
 
+    /// <summary>
+    /// Overload ottimizzato esclusivamente per il conteggio.
+    /// Salta il calcolo delle righe e non emette eventi.
+    /// Prestazioni massime per la modalità CountOnly.
+    /// </summary>
+    public long Search(ReadOnlySpan<byte> text)
+    {
+        int state = 0;
+        long matchCount = 0;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            int c = text[i];
+            
+            // rimosso il check di c == '\n' perché currentLine qui non serve!
+
+            state = _goto[(state << 8) + c];
+
+            if (_output[state] == -1 && _dict[state] == -1) continue;
+
+            int s = state;
+            while (s != -1)
+            {
+                if (_output[s] != -1)
+                {
+                    matchCount++;
+                }
+                s = _dict[s];
+            }
+        }
+
+        return matchCount;
+    }
+
     /// <summary>Overload per Span&lt;byte&gt; mutabile.</summary>
     public void Search<THandler>(Span<byte> text, ref THandler handler)
         where THandler : struct, IMatchHandler

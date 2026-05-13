@@ -15,9 +15,12 @@ using plugins.move;
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
 Console.OutputEncoding = System.Text.Encoding.UTF8;
+AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
+AnsiConsole.Profile.Capabilities.Ansi = true;
+AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "1.9.8";
-const string versionDescription = "Ottimizzazioni varie";
+const string version = "1.9.9";
+const string versionDescription = "Console encoding";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -187,9 +190,9 @@ static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryB
     // 3. Avvolgiamo la griglia in un pannello decorato
     var panel = new Panel(grid)
         .Header("[bold cyan]Statistiche di Esecuzione[/]")
-        .Border(BoxBorder.Rounded)
+        .Border(BoxBorder.Ascii)
         .BorderColor(Color.DarkCyan)
-        .Padding(2, 1, 2, 1); // Padding interno (sinistra, sopra, destra, sotto)
+        .Padding(2, 0, 2, 0);
 
     // Aggiungiamo uno spazio vuoto prima del pannello per distanziarlo dall'output del plugin
     AnsiConsole.WriteLine();
