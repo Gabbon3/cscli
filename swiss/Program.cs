@@ -14,6 +14,7 @@ using plugins.move;
 // # ----------------------- #
 // # CONFIGURAZIONE INIZIALE #
 // # ----------------------- #
+Console.OutputEncoding = System.Text.Encoding.UTF8;
 // info sulla versione
 const string version = "1.9.8";
 const string versionDescription = "Ottimizzazioni varie";
