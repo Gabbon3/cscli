@@ -34,6 +34,7 @@ namespace plugins.eliminator
             public FileAttributes AttributesToSkip { get; set; }
             public bool DropInstant { get; set; }
             public int ThreadNumber { get; set; }
+            public FileFilterFactory.FilterOptions? FileFilterOptions { get; set; }
             public FileSystemFilter? FileFilter { get; set; }
 
             public Channel<StackFileInfo>? WorkChannel { get; set; }
@@ -60,6 +61,19 @@ namespace plugins.eliminator
 
             // 1. parsing e validazione delle settings
             if (!ParseAndValidateSettings(settings))
+            {
+                return;
+            }
+
+            // 2. chiedo conferma all'utente prima di procedere mostrando i filtri
+            ConsolePlus.Write($"[Red]#[/] [Yellow]Confermi di voler procedere[/]? [Yellow]S[/] per confermare");
+            if (State.FileFilterOptions != null)
+            {
+                ConsolePlus.Write(State.FileFilterOptions.ToString());
+            }
+            string? confirm = Console.ReadLine();
+            // controllo
+            if (string.IsNullOrEmpty(confirm) || confirm != "S")
             {
                 return;
             }
@@ -114,7 +128,7 @@ namespace plugins.eliminator
             State.AttributesToSkip = FileAttributes.System;
             if (!settings.IncludeHidden) State.AttributesToSkip |= FileAttributes.Hidden;
 
-            var filterOpts = new FileFilterFactory.FilterOptions(
+            State.FileFilterOptions = new FileFilterFactory.FilterOptions(
                 Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
@@ -122,7 +136,7 @@ namespace plugins.eliminator
                 ModifiedAfter: settings.Since
             );
 
-            State.FileFilter = FileFilterFactory.CreateFilter(filterOpts);
+            State.FileFilter = FileFilterFactory.CreateFilter(State.FileFilterOptions);
 
             State.DropTargetPathAtEnd = settings.DropSource;
 

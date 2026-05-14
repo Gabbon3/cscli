@@ -26,7 +26,7 @@ namespace plugins.eliminator
         [Option("drop-source|ds", "Cancella al termine anche la cartella target")]
         public bool DropSource { get; set; } = false;
 
-        [Option("silence|s", "Non mostrare la UI di progressione a video")]
+        [Option("silence|q", "Non mostrare la UI di progressione a video")]
         public bool Silence { get; set; }
 
         // --- OPZIONI CON VALORE ---

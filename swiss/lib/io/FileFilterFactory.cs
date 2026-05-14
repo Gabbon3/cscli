@@ -1,4 +1,5 @@
 using System.IO.Enumeration;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace lib.io
@@ -15,7 +16,7 @@ namespace lib.io
         // enum per definire il tipo di ricerca
         // Record che raggruppa tutti i filtri
         public record FilterOptions(
-            string? Pattern =  null,
+            string? Pattern = null,
             FilterFileNameMatchType MatchType = FilterFileNameMatchType.Regex, // default regex per semplicita
             bool IgnoreCase = true,
             // modifica
@@ -27,7 +28,49 @@ namespace lib.io
             // accesso
             DateTime? AccessedAfter = null,
             DateTime? AccessedBefore = null
-        );
+        )
+        {
+            /// <summary>
+            /// Restituisce una descrizione testuale e human-readable dei filtri attivi.
+            /// Ideale per la conferma in CLI prima dell'esecuzione.
+            /// </summary>
+            public override string ToString()
+            {
+                var sb = new StringBuilder();
+
+                if (!string.IsNullOrEmpty(Pattern))
+                {
+                    string caseStr = IgnoreCase ? "(Case-Insensitive)" : "(Case-Sensitive)";
+                    string matchStr = MatchType switch
+                    {
+                        FilterFileNameMatchType.Regex => "Espressione Regolare",
+                        FilterFileNameMatchType.Fixed => "Testo Esatto",
+                        FilterFileNameMatchType.Glob => "Pattern Glob",
+                        _ => "Sconosciuto"
+                    };
+                    sb.AppendLine($"[Cyan]*[/] Nome file: Corrispondenza {matchStr} con '{Pattern}' {caseStr}");
+                }
+
+                // Date di Creazione
+                if (CreatedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Creato dopo (piu vecchio): {CreatedAfter.Value}");
+                if (CreatedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Creato prima (piu recente): {CreatedBefore.Value}");
+
+                // Date di Modifica
+                if (ModifiedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Modificato dopo (piu vecchio): {ModifiedAfter.Value}");
+                if (ModifiedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Modificato prima (piu recente): {ModifiedBefore.Value}");
+
+                // Date di Accesso
+                if (AccessedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Accesso dopo (piu vecchio): {AccessedAfter.Value}");
+                if (AccessedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Accesso prima (piu recente): {AccessedBefore.Value}");
+
+                if (sb.Length == 0)
+                {
+                    return "Nessun filtro applicato (Tutti i file saranno inclusi).";
+                }
+
+                return "[Cyan]#[/] Filtri attivi:\n" + sb.ToString().TrimEnd();
+            }
+        };
 
         /// <summary>
         /// Fonde due filtri. Se il primo fallisce, il secondo non viene nemmeno eseguito.
