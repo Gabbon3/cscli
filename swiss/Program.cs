@@ -159,9 +159,9 @@ static void Help(List<PluginRegistration> plugins)
     int maxNameLength = plugins.Count != 0 ? plugins.Max(p => p.Name.Length) : 0;
     foreach (var plugin in plugins)
     {
-        ConsolePlus.Write($"[Cyan]* [Green]{plugin.Name.PadRight(maxNameLength)}[/] -> [Yellow]{plugin.Description}[/]");
+        ConsolePlus.Write($"[Cyan]* [Green]{plugin.Name.PadRight(maxNameLength)}[/] {plugin.Description}");
     }
-    ConsolePlus.Write($"[Cyan]* [Green]{"--stats".PadRight(maxNameLength)}[/] -> [DarkGray]Inseriscilo come ultimo argomento per stampare le statistiche di esecuzione[/]");
+    ConsolePlus.Write($"[Cyan]* [Magenta]{"--stats".PadRight(maxNameLength)}[/] Inseriscilo come ultimo argomento per stampare le statistiche di esecuzione");
     ConsolePlus.WriteHr();
 }
 

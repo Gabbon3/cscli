@@ -6,7 +6,7 @@ namespace plugins.regexgrep
         [Fixed(0, "percorso", "La directory di partenza (usa '.' per la cartella corrente)")]
         public string TargetPath { get; set; } = string.Empty;
 
-        [Fixed(1, "pattern", "Le parole da cercare, separate da '|' (es: 'error|warning|fail')")]
+        [Fixed(1, "pattern", "Il pattern regex da ricercare")]
         public string Pattern { get; set; } = string.Empty;
 
         [Option("silence|s", "Se attivo non mostra i risultati a console")]

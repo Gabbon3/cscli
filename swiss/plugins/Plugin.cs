@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using lib.console;
 using Spectre.Console;
 
 namespace plugins;
@@ -205,9 +206,8 @@ public abstract class Plugin
     }
 
     /// <summary>
-    /// Stampa dell'Help standardizzata basata sulla struttura dei settings
+    /// Stampa dell'Help standardizzata basata sulla struttura dei settings usando ConsolePlus
     /// </summary>
-    /// <typeparam name="TSettings"></typeparam>
     public void PrintHelp<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] TSettings>(bool printEndLine = true)
     {
         var properties = typeof(TSettings).GetProperties();
@@ -227,80 +227,82 @@ public abstract class Plugin
 
         // --- COMPOSIZIONE OUTPUT ---
 
-        // # Utilizzo
-        // NOTA: uso [[ ]] per stampare le parentesi quadre letterali in Spectre
-        string safeName = Markup.Escape(Name);
-        string usageLine = $"[yellow]swiss[/] [blue]{safeName}[/]";
-
+        // Costruisco la stringa di utilizzo
+        string usageLine = $"[Yellow]swiss[/] [Blue]{Name}[/]";
         foreach (var fa in fixedArgs)
         {
-            usageLine += $" [grey]<{Markup.Escape(fa.Attr!.Name)}>[/]";
+            usageLine += $" [DarkGray]<{fa.Attr!.Name}>[/]";
         }
-        if (options.Any()) usageLine += " [grey][[opzioni]][/]";
+        if (options.Any()) usageLine += " [DarkGray][opzioni][/]";
 
-        var usagePanel = new Panel(usageLine)
-            .Header("[bold cyan] Uso [/]")
-            .Border(BoxBorder.Rounded)
-            .BorderColor(Color.Gray)
-            .Padding(2, 0, 2, 0);
+        // Uso ConsolePlus per l'intestazione
+        ConsolePlus.WriteBoxHeader("Uso", 80);
+        ConsolePlus.Write($"  {usageLine}");
+        ConsolePlus.WriteHr(80);
+        ConsolePlus.Write(""); // Riga vuota
 
-        AnsiConsole.Write(usagePanel);
-        AnsiConsole.WriteLine();
+        // 3. Calcolo il padding dinamico per l'allineamento a colonna
+        int maxArgLen = fixedArgs.Any() ? fixedArgs.Max(x => x.Attr!.Name.Length + 2) : 0; // +2 per le parentesi <>
+        int maxOptLen = options.Any() ? options.Max(x =>
+        {
+            int len = x.Attr!.LongName.Length + 2; // "--" + nome
+            if (!string.IsNullOrEmpty(x.Attr.ShortName)) len += x.Attr.ShortName.Length + 3; // ", -" + short
+            return len;
+        }) : 0;
 
-        var grid = new Grid()
-            .AddColumn(new GridColumn().NoWrap().PadRight(4)) // Colonna Parametri
-            .AddColumn(new GridColumn());                     // Colonna Descrizioni
+        int padding = Math.Max(maxArgLen, maxOptLen) + 4; // +4 per spazio extra di respiro
 
-        // stampa dei Fixed (in ordine)
+        // 4. Stampa Argomenti Fixed
         if (fixedArgs.Count != 0)
         {
-            grid.AddRow("[bold cyan]Argomenti:[/]", "");
+            ConsolePlus.Write("[Cyan]Argomenti:[/]");
             foreach (var fa in fixedArgs)
             {
-                grid.AddRow($"  [white]<{Markup.Escape(fa.Attr!.Name)}>[/]", fa.Attr.Description ?? "");
+                string left = $"<{fa.Attr!.Name}>".PadRight(padding);
+                ConsolePlus.Write($"  [White]{left}[/][DarkGray]{fa.Attr.Description ?? ""}[/]");
             }
-            grid.AddEmptyRow();
+            ConsolePlus.Write("");
         }
 
-        // stampa Opzioni
+        // 5. Stampa Opzioni
         if (options.Count != 0)
         {
-            grid.AddRow("[bold cyan]Opzioni:[/]", "");
-            string category = options[0].Attr!.Category ?? "";
-
-            // Stampo la prima categoria
-            if (!string.IsNullOrEmpty(category))
-            {
-                grid.AddRow($"  [bold yellow]{Markup.Escape(category)}:[/]", "");
-            }
+            ConsolePlus.Write("[Cyan]Opzioni:[/]");
+            string category = "";
 
             foreach (var opt in options)
             {
                 string currentCategory = opt.Attr!.Category ?? "";
 
+                // Stampa l'intestazione di categoria se cambia
                 if (currentCategory != category)
                 {
                     category = currentCategory;
-                    grid.AddEmptyRow();
-                    grid.AddRow($"  [bold yellow]{Markup.Escape(category)}:[/]", "");
+                    if (!string.IsNullOrEmpty(category))
+                    {
+                        ConsolePlus.Write(""); // Spazio prima di una nuova categoria
+                        ConsolePlus.Write($"  [Yellow]{category}:[/]");
+                    }
                 }
 
+                // Composizione dei flag
                 string shortFlag = !string.IsNullOrEmpty(opt.Attr!.ShortName) ? $", -{opt.Attr.ShortName}" : "";
                 string flags = $"--{opt.Attr.LongName}{shortFlag}";
 
-                grid.AddRow($"    [green]{Markup.Escape(flags)}[/]", opt.Attr.Description ?? "");
+                // Indentazione: se c'è una categoria indento di più
+                string indent = string.IsNullOrEmpty(category) ? "  " : "    ";
+
+                string left = flags.PadRight(padding);
+                ConsolePlus.Write($"{indent}[Green]{left}[/][DarkGray]{opt.Attr.Description ?? ""}[/]");
             }
         }
 
-        AnsiConsole.Write(grid);
-
         if (printEndLine)
         {
-            AnsiConsole.WriteLine();
-            AnsiConsole.Write(new Rule().RuleStyle("grey"));
+            ConsolePlus.Write("");
+            ConsolePlus.WriteHr(80);
         }
     }
-
     public virtual void Help()
     {
         PrintWarning("Nessun help definito");
