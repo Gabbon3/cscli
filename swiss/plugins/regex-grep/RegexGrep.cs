@@ -118,7 +118,7 @@ namespace plugins.regexgrep
                 $"Match totali: [Green]{TotalMatchCount:N0}[/]",
                 $"File totali controllati: [Magenta]{TotalFileVisited:N0}[/]",
                 $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]",
-                $"Velocità media: [Cyan]{gbSec:N2} GB/sec[/]"
+                $"Throughput: [Cyan]{gbSec:N2} GB/sec[/]"
             ]);
             ConsolePlus.WriteHr(40);
         }
