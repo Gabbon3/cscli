@@ -24,7 +24,7 @@ namespace plugins.find
         [Option("fixed|f", "Verifica se il pattern è contenuto nel nome (ignora regex)", "Ricerca")]
         public bool FixedMatch { get; set; }
 
-        [Option("since|s", "Trova i file modificati da questa data in poi", "Ricerca")]
+        [Option("newer-than|n", "Trova i file modificati da questa data in poi", "Ricerca")]
         public DateTime? Since { get; set; }
 
         [Option("older-than|o", "Trova i file più vecchi di questa data", "Ricerca")]

@@ -49,6 +49,7 @@ namespace plugins.eliminator
         // # Esecuzione Principale
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
+            ConsolePlus.Write($"[DarkGreen]# Avvio Eliminator[/]\n");
             var settings = ParseSettings<EliminatorSettings>(args);
 
             if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath))
@@ -65,16 +66,20 @@ namespace plugins.eliminator
                 return;
             }
 
-            // 2. chiedo conferma all'utente prima di procedere mostrando i filtri
-            ConsolePlus.Write($"[Red]#[/] [Yellow]Confermi di voler procedere[/]? [Yellow]S[/] per confermare");
+            // 2. stampo i filtri in uso e chiedo conferma all'utente prima di procedere mostrando i filtri
             if (State.FileFilterOptions != null)
             {
                 ConsolePlus.Write(State.FileFilterOptions.ToString());
             }
-            string? confirm = Console.ReadLine();
+            ConsolePlus.Write($"\n[Red]# Confermi di voler procedere?[/]");
+            string confirm = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .PageSize(3)
+                .AddChoices(["No", "Si"]));
             // controllo
-            if (string.IsNullOrEmpty(confirm) || confirm != "S")
+            if (string.IsNullOrEmpty(confirm) || confirm != "Si")
             {
+                ConsolePlus.Write($"[Green]#[/] Operazione annullata.");
                 return;
             }
 

@@ -28,7 +28,7 @@ namespace plugins.count
         [Option("pattern|p", "Filtra i file/cartelle in base al nome")]
         public string? Pattern { get; set; }
 
-        [Option("since|s", "Conta solo gli elementi modificati da questa data in poi")]
+        [Option("newer-than|n", "Conta solo gli elementi modificati da questa data in poi")]
         public DateTime? Since { get; set; }
 
         [Option("older-than|o", "Conta solo gli elementi più vecchi di questa data/età")]

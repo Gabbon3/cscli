@@ -43,25 +43,25 @@ namespace lib.io
                     string caseStr = IgnoreCase ? "(Case-Insensitive)" : "(Case-Sensitive)";
                     string matchStr = MatchType switch
                     {
-                        FilterFileNameMatchType.Regex => "Espressione Regolare",
-                        FilterFileNameMatchType.Fixed => "Testo Esatto",
-                        FilterFileNameMatchType.Glob => "Pattern Glob",
+                        FilterFileNameMatchType.Regex => "Espressione regolare",
+                        FilterFileNameMatchType.Fixed => "Testo fisso",
+                        FilterFileNameMatchType.Glob => "Pattern glob",
                         _ => "Sconosciuto"
                     };
                     sb.AppendLine($"[Cyan]*[/] Nome file: Corrispondenza {matchStr} con '{Pattern}' {caseStr}");
                 }
 
                 // Date di Creazione
-                if (CreatedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Creato dopo (piu vecchio): {CreatedAfter.Value}");
-                if (CreatedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Creato prima (piu recente): {CreatedBefore.Value}");
+                if (CreatedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Piu recente [DarkGray](data creazione)[/]: {CreatedAfter.Value:dd.MM.yyyy HH:ss}");
+                if (CreatedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data creazione)[/]: {CreatedBefore.Value:dd.MM.yyyy HH:ss}");
 
                 // Date di Modifica
-                if (ModifiedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Modificato dopo (piu vecchio): {ModifiedAfter.Value}");
-                if (ModifiedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Modificato prima (piu recente): {ModifiedBefore.Value}");
+                if (ModifiedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Piu recente [DarkGray](data modifica)[/]: {ModifiedAfter.Value:dd.MM.yyyy HH:ss}");
+                if (ModifiedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data modifica)[/]: {ModifiedBefore.Value:dd.MM.yyyy HH:ss}");
 
                 // Date di Accesso
-                if (AccessedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Accesso dopo (piu vecchio): {AccessedAfter.Value}");
-                if (AccessedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Accesso prima (piu recente): {AccessedBefore.Value}");
+                if (AccessedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Piu recente [DarkGray](data ultimo accesso)[/]: {AccessedAfter.Value:dd.MM.yyyy HH:ss}");
+                if (AccessedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data ultimo accesso)[/]: {AccessedBefore.Value:dd.MM.yyyy HH:ss}");
 
                 if (sb.Length == 0)
                 {
