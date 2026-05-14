@@ -9,6 +9,7 @@ using lib.algorithm;
 using lib.utils;
 using System.Buffers;
 using lib.io;
+using System.Diagnostics;
 
 namespace plugins.grep
 {
@@ -141,7 +142,9 @@ namespace plugins.grep
             BuildPatternList(settings.Pattern);
             // 4. configuro le cartelle da escludere/includere nella ricerca
             ConfigureDirectoryFilters(settings);
-            // 5. preparo AhoCorasick e il channel del producer
+            // 5. preparo AhoCorasick e il channel del producer e avvio il cronometro
+            long startTimestamp = Stopwatch.GetTimestamp();
+            // ---
             InitializeEngine();
             ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca...\n[DarkGray]*\n*[/]");
             try
@@ -161,12 +164,18 @@ namespace plugins.grep
                 await _fastPrinter!.Complete();
             }
             // 9. termine
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+            double seconds = elapsed.TotalSeconds;
+            double totalGB = TotalSizeVisited / 1_073_741_824.0; // 1024^3
+            double gbSec = seconds > 0 ? totalGB / seconds : 0;
+            // ---
             if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
             ConsolePlus.WriteBoxHeader($"Ricerca completata", 40);
             ConsolePlus.WriteList([
                 $"Match totali: [Green]{TotalMatchCount:N0}[/]",
                 $"File totali controllati: [Magenta]{TotalFileVisited:N0}[/]",
-                $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]"
+                $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]",
+                $"Velocità media: [Cyan]{gbSec:N2} GB/sec[/]"
             ]);
             ConsolePlus.WriteHr(40);
         }
@@ -376,7 +385,6 @@ namespace plugins.grep
                 foreach (var grepFileEntry in enumerable)
                 {
                     if (ct.IsCancellationRequested) break;
-                    TotalSizeVisited += grepFileEntry.Size;
                     TotalFileVisited++;
                     await State.FilesChannel.Writer.WriteAsync(grepFileEntry.Path, ct);
                 }
@@ -404,17 +412,19 @@ namespace plugins.grep
                     byte[] workerBuffer = new byte[65536];
                     byte[] lowerBuffer = IgnoreCase ? new byte[65536] : [];
                     long threadMatchCount = 0;
+                    long totalByteSizeVisited = 0;
 
                     try
                     {
                         await foreach (var path in State.FilesChannel.Reader.ReadAllAsync(ct))
                         {
-                            threadMatchCount += ProcessFile(path, workerBuffer, lowerBuffer, LongestPattern);
+                            threadMatchCount += ProcessFile(path, workerBuffer, lowerBuffer, LongestPattern, ref totalByteSizeVisited);
                         }
                     }
                     finally
                     {
                         Interlocked.Add(ref TotalMatchCount, threadMatchCount);
+                        Interlocked.Add(ref TotalSizeVisited, totalByteSizeVisited);
                     }
                 }, ct);
             }
@@ -431,7 +441,7 @@ namespace plugins.grep
         /// Processa un file cercando il pattern con AhoCorasick a blocchi da 64 KB.
         /// Accede a: AhoEngine, PatternLengths, IgnoreCase, _fastPrinter
         /// </summary>
-        private long ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap)
+        private long ProcessFile(string path, byte[] buffer, byte[] lowerBuffer, int overlap, ref long totalByteSizeVisited)
         {
             SafeFileHandle? handle = null;
             long matchCount = 0;
@@ -454,6 +464,7 @@ namespace plugins.grep
 
                     int currentDataLength = bytesRead + leftover;
                     ReadOnlySpan<byte> dataSpan = buffer.AsSpan(0, currentDataLength);
+                    totalByteSizeVisited += bytesRead;
 
                     if (isFirstChunk)
                     {

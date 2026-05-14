@@ -10,6 +10,7 @@ using lib.console.fastprinter;
 using lib.utils;
 using System.Buffers;
 using lib.io;
+using System.Diagnostics;
 
 namespace plugins.regexgrep
 {
@@ -85,6 +86,8 @@ namespace plugins.regexgrep
             ValidateAndCompileRegex(settings.Pattern);
             ConfigureDirectoryFilters(settings);
             InitializeEngine();
+            // inizializzo cronometro
+            long startTimestamp = Stopwatch.GetTimestamp();
             
             ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca con regex...\n[DarkGray]*\n*[/]");
             
@@ -103,13 +106,19 @@ namespace plugins.regexgrep
             {
                 await _fastPrinter!.Complete();
             }
-            
+            // # termine
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+            double seconds = elapsed.TotalSeconds;
+            double totalGB = TotalSizeVisited / 1_073_741_824.0; // 1024^3
+            double gbSec = seconds > 0 ? totalGB / seconds : 0;
+            // ---
             if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
             ConsolePlus.WriteBoxHeader($"Ricerca completata", 40);
             ConsolePlus.WriteList([
                 $"Match totali: [Green]{TotalMatchCount:N0}[/]",
                 $"File totali controllati: [Magenta]{TotalFileVisited:N0}[/]",
-                $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]"
+                $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]",
+                $"Velocità media: [Cyan]{gbSec:N2} GB/sec[/]"
             ]);
             ConsolePlus.WriteHr(40);
         }
@@ -301,7 +310,6 @@ namespace plugins.regexgrep
                 foreach (var grepFileEntry in enumerable)
                 {
                     if (ct.IsCancellationRequested) break;
-                    TotalSizeVisited += grepFileEntry.Size;
                     TotalFileVisited++;
                     await State.FilesChannel.Writer.WriteAsync(grepFileEntry.Path, ct);
                 }
@@ -326,17 +334,19 @@ namespace plugins.regexgrep
                     byte[] byteBuffer = new byte[ByteBufferSize];
                     char[] charBuffer = new char[CharBufferSize];
                     long threadMatchCount = 0;
+                    long totalByteSizeVisited = 0;
 
                     try
                     {
                         await foreach (var path in State.FilesChannel.Reader.ReadAllAsync(ct))
                         {
-                            threadMatchCount += ProcessFile(path, byteBuffer, charBuffer);
+                            threadMatchCount += ProcessFile(path, byteBuffer, charBuffer, ref totalByteSizeVisited);
                         }
                     }
                     finally
                     {
                         Interlocked.Add(ref TotalMatchCount, threadMatchCount);
+                        Interlocked.Add(ref TotalSizeVisited, totalByteSizeVisited);
                     }
                 }, ct);
             }
@@ -350,7 +360,7 @@ namespace plugins.regexgrep
         /// <summary>
         /// Processa un file convertendo UTF-8 -> UTF-16 e usando Regex.EnumerateMatches (zero-alloc).
         /// </summary>
-        private long ProcessFile(string path, byte[] byteBuffer, char[] charBuffer)
+        private long ProcessFile(string path, byte[] byteBuffer, char[] charBuffer, ref long totalByteSizeVisited)
         {
             SafeFileHandle? handle = null;
             long matchCount = 0;
@@ -375,6 +385,7 @@ namespace plugins.regexgrep
 
                     int currentByteLength = bytesRead + leftoverBytes;
                     ReadOnlySpan<byte> byteSpan = byteBuffer.AsSpan(0, currentByteLength);
+                    totalByteSizeVisited += bytesRead;
 
                     // Binary file detection (solo primo chunk)
                     if (isFirstChunk)
