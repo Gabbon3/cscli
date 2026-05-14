@@ -19,10 +19,10 @@ namespace plugins.regexgrep
         public override string Name => "rgrep";
         public override string Description => "Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)";
 
-        // # Stato condiviso tra i metodi
+        // # stato condiviso tra i metodi
         private RegexGrepState State = new();
 
-        // # Attributi di classe
+        // # attributi
         private bool IgnoreCase = false;
         private bool Silence;
         private bool CountOnly = false;
@@ -38,7 +38,7 @@ namespace plugins.regexgrep
         private const int PathRentBytes = 2048;
         private const int ByteBufferSize = 65536;
         private const int CharBufferSize = 65536;
-        private const int ByteOverlapSize = 4096; // ~1365 char nel worst case UTF-8
+        private const int ByteOverlapSize = 4096; // circa 1365 char circa nel peggiore dei casi in UTF-8 (1 char max 3 byte)
 
         #region Structs
 
@@ -53,12 +53,19 @@ namespace plugins.regexgrep
             ".cargo",
         };
 
+        /// <summary>
+        /// Struttura usata per l'enumerazione dei file
+        /// </summary>
+        /// <param name="entry"></param>
         private readonly struct GrepFileEntry(ref FileSystemEntry entry)
         {
             public readonly string Path { get; } = entry.ToSpecifiedFullPath();
             public readonly long Size { get; } = entry.Length;
         }
 
+        /// <summary>
+        /// classe di stato condiviso tra le classi
+        /// </summary>
         private class RegexGrepState
         {
             public string Root = string.Empty;
@@ -70,8 +77,13 @@ namespace plugins.regexgrep
         #endregion
         #region RunAsync
 
+        /// <summary>
+        /// Esecuzione comando principale
+        /// </summary>
+        /// <returns></returns>
         public override async Task RunAsync(string[] args, CancellationToken ct)
         {
+            // 1. parsing degli argomenti da linea di comando
             var settings = ParseSettings<RegexGrepSettings>(args);
             if (args.Contains("--help") || string.IsNullOrEmpty(settings.TargetPath) || string.IsNullOrEmpty(settings.Pattern))
             {
@@ -80,36 +92,40 @@ namespace plugins.regexgrep
             }
 
             State = new RegexGrepState();
-            
+            // 2. valido i configuro stati e attributi della classe
             if (!ParseAndValidateSettings(settings)) return;
-            
+            // 3. valido e compilo la regex
             ValidateAndCompileRegex(settings.Pattern);
+            // 4. configuro i filtri delle directory
             ConfigureDirectoryFilters(settings);
+            // 5. inizializzo il motore regex e il channel
             InitializeEngine();
-            // inizializzo cronometro
+            // 6. inizializzo cronometro per tracciare il tempo di esecuzione effettivo
             long startTimestamp = Stopwatch.GetTimestamp();
-            
+            // ---
             ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca con regex...\n[DarkGray]*\n*[/]");
-            
+            // ---
             try
             {
+                // 7. avvio il fastprinter per la stampa a console concorrente
                 _fastPrinter!.Run(ct);
-                
+                // 8. avvio il produttore e i consumatori
                 var producerTask = RunProducerAsync(settings, ct);
                 var workerTasks = StartWorkers(settings, ct);
-                
+                // 9. attendo l'esecuzione di entrambi
                 await producerTask;
                 await Task.WhenAll(workerTasks);
             }
             catch (OperationCanceledException) { }
             finally
             {
+                // chiudo il channel del fastprinter
                 await _fastPrinter!.Complete();
             }
-            // # termine
+            // 10. termine esecuzione, calcolo statistiche finali
             TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
             double seconds = elapsed.TotalSeconds;
-            double totalGB = TotalSizeVisited / 1_073_741_824.0; // 1024^3
+            double totalGB = TotalSizeVisited / 1_073_741_824.0; // 1 GB = 1024^3
             double gbSec = seconds > 0 ? totalGB / seconds : 0;
             // ---
             if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
@@ -150,7 +166,7 @@ namespace plugins.regexgrep
             // Setup output
             IFastOutput printerOutput = ConsoleOutput.Instance;
             bool hasOutputFile = !string.IsNullOrWhiteSpace(settings.OutputFile);
-            
+
             if (hasOutputFile)
             {
                 var fileOutput = new FileOutput(settings.OutputFile!);
@@ -178,7 +194,7 @@ namespace plugins.regexgrep
             State.Root = root;
             MinMatchCount = settings.MinCount > 0 ? settings.MinCount : 1;
             MaxMatchCount = settings.MaxCount > 0 ? settings.MaxCount : -1;
-            
+
             if (MaxMatchCount > 0 && MaxMatchCount < MinMatchCount)
             {
                 PrintError("Parametri non validi, --max-count non puo essere minore di --min-count");
@@ -198,13 +214,13 @@ namespace plugins.regexgrep
         private void ValidateAndCompileRegex(string pattern)
         {
             State.Pattern = pattern;
-            
+
             try
             {
                 // Test compilation con timeout per evitare blocchi
                 var testOptions = RegexOptions.None;
                 if (IgnoreCase) testOptions |= RegexOptions.IgnoreCase;
-                
+
                 // Test del pattern prima di compilare
                 _ = Regex.IsMatch("test", pattern, testOptions, TimeSpan.FromMilliseconds(100));
             }
@@ -249,12 +265,15 @@ namespace plugins.regexgrep
 
         private void InitializeEngine()
         {
-            // Configurazione Regex ottimizzata
+            // configurazione regex ottimizzata:
+            // - Compiled: la regex viene compilata in codice macchina
+            // - NonBacktracking: la regex utilizza un DFA lineare
             var options = RegexOptions.Compiled | RegexOptions.NonBacktracking;
             if (IgnoreCase) options |= RegexOptions.IgnoreCase;
 
             RegexEngine = new Regex(State.Pattern, options);
-            
+
+            // configuro il channel
             State.FilesChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(FilesChannelBound)
             {
                 SingleWriter = true,
@@ -274,13 +293,13 @@ namespace plugins.regexgrep
                 IgnoreInaccessible = true,
                 ReturnSpecialDirectories = false
             };
-            
+
             FileSystemFilter? fileFilter = FileFilterFactory.CreateFilter(new FileFilterFactory.FilterOptions
             {
                 Pattern = settings.Glob,
                 MatchType = FilterFileNameMatchType.Glob,
             });
-            
+
             var enumerable = new FileSystemEnumerable<GrepFileEntry>(
                 State.Root,
                 (ref FileSystemEntry entry) => new GrepFileEntry(ref entry),
@@ -304,7 +323,7 @@ namespace plugins.regexgrep
                     return true;
                 }
             };
-            
+
             try
             {
                 foreach (var grepFileEntry in enumerable)
@@ -364,52 +383,55 @@ namespace plugins.regexgrep
         {
             SafeFileHandle? handle = null;
             long matchCount = 0;
-            
+
             try
             {
+                // apro l'handle a basso livello per bypassare l'overhead dell'I/O standard di .NET
                 handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
                 long fileLength = RandomAccess.GetLength(handle);
                 if (fileLength == 0) return 0;
 
+                // stato del lettore a chunk
                 long fileOffset = 0;
-                int leftoverBytes = 0;
-                int totalLines = 1;
+                int leftoverBytes = 0; // byte residui (orfani + overlap) da iniettare nel ciclo successivo
+                int totalLines = 1;    // tracciamento globale delle righe '\n'
                 bool isFirstChunk = true;
-                int overlapChars = 0;
+                int overlapChars = 0;  // char da ignorare a fine chunk per evitare match tagliati a metà
 
                 while (fileOffset < fileLength)
                 {
+                    // calcolo quanti byte pescare dal disco, tenendo conto del leftover già presente in testa al buffer
                     int bytesToRead = (int)Math.Min(byteBuffer.Length - leftoverBytes, fileLength - fileOffset);
                     int bytesRead = RandomAccess.Read(handle, byteBuffer.AsSpan(leftoverBytes, bytesToRead), fileOffset);
                     if (bytesRead == 0) break;
 
                     int currentByteLength = bytesRead + leftoverBytes;
                     ReadOnlySpan<byte> byteSpan = byteBuffer.AsSpan(0, currentByteLength);
-                    totalByteSizeVisited += bytesRead;
+                    totalByteSizeVisited += bytesRead; // telemetria: sommo solo i byte freschi appena estratti dal disco
 
-                    // Binary file detection (solo primo chunk)
+                    // euristica sui file binari: se rilevo un byte nullo (0x00) nel primo blocco, scarto l'intero file
                     if (isFirstChunk)
                     {
                         if (byteSpan.Contains((byte)0)) return 0;
                         isFirstChunk = false;
                     }
 
-                    // Conversione UTF-8 -> UTF-16 vettorializzata (SIMD)
+                    // conversione vettorializzata UTF-8 -> UTF-16 (SIMD, zero-alloc)
                     OperationStatus status = Utf8.ToUtf16(byteSpan, charBuffer, out int bytesConsumed, out int charsWritten);
-                    
+
                     if (status == OperationStatus.InvalidData)
                     {
-                        // File non UTF-8 valido, saltiamo
+                        // il file contiene byte non conformi allo standard UTF-8 (es binari/compressi anomali), annullo
                         return 0;
                     }
 
                     ReadOnlySpan<char> searchSpan = charBuffer.AsSpan(0, charsWritten);
 
-                    // Calcola fino a dove processare (escludendo l'overlap che verrà riprocessato)
+                    // definisco la "safe-zone" per la regex: escludo la coda del buffer che verrà ri-analizzata nel chunk successivo
                     int searchEndIndex = isFirstChunk ? charsWritten : charsWritten - overlapChars;
                     if (searchEndIndex < 0) searchEndIndex = charsWritten;
 
-                    // Esegui il matching con Regex
+                    // avvio lo scan sul testo normalizzato in memoria
                     if (CountOnly)
                     {
                         matchCount += CountMatches(searchSpan, searchEndIndex);
@@ -419,50 +441,50 @@ namespace plugins.regexgrep
                         matchCount += ProcessMatches(searchSpan, searchEndIndex, path, charBuffer, charsWritten, totalLines);
                     }
 
-                    // Gestione leftover bytes (caratteri UTF-8 incompleti)
+                    // recupero i byte "orfani" (codifiche UTF-8 multi-byte spezzate dal taglio del chunk)
                     int unconsumedBytes = currentByteLength - bytesConsumed;
-                    
-                    // Gestione overlap: manteniamo ByteOverlapSize byte per evitare match spezzati
+
+                    // estrazione dell'overlap: mantengo un margine di sicurezza (ByteOverlapSize) per evitare di frammentare i match
                     int overlapBytes = Math.Min(ByteOverlapSize, bytesConsumed);
                     leftoverBytes = unconsumedBytes + overlapBytes;
-                    
-                    // Copiamo i byte da mantenere all'inizio del buffer
+
+                    // memory shift: sposto il blocco di byte da conservare all'inizio del buffer per il prossimo giro
                     byteSpan[(currentByteLength - leftoverBytes)..].CopyTo(byteBuffer);
 
-                    // Calcola overlap in char per il prossimo chunk
-                    // Stima conservativa: nel worst case UTF-8, 3 byte = 1 char
+                    // stima conservativa dell'overlap in char per calcolare la safe-zone del prossimo chunk.
+                    // nel worst-case UTF-8 un carattere occupa 3 byte
                     overlapChars = Math.Min(1024, overlapBytes / 3 + 1);
 
-                    // Conta le linee processate (escluso overlap)
+                    // aggiorno il contatore delle righe calcolando i '\n' esclusivamente sulla porzione di testo consumata
                     int charsProcessed = Math.Min(searchEndIndex, charsWritten);
                     totalLines += CountLines(searchSpan[..charsProcessed]);
-                    
+
                     fileOffset += bytesRead;
                 }
             }
-            catch (UnauthorizedAccessException) { }
-            catch (IOException) { }
+            catch (UnauthorizedAccessException) { /* ignoro silenziosamente i file di sistema bloccati */ }
+            catch (IOException) { /* ignoro i file aperti in uso esclusivo da altri processi */ }
             finally
             {
                 handle?.Dispose();
             }
-            
-            // Gestione count-only con min/max
+
+            // validazione dei constraint numerici per la modalità count-only
             if (CountOnly)
             {
                 bool satisfiesMin = matchCount >= MinMatchCount;
                 bool satisfiesMax = MaxMatchCount == -1 || matchCount <= MaxMatchCount;
-                
+
                 if (satisfiesMin && satisfiesMax)
                 {
                     PrintCountResult(path, matchCount);
                 }
                 else
                 {
-                    matchCount = 0;
+                    matchCount = 0; // i limiti non sono rispettati, invalido il conteggio per questo file
                 }
             }
-            
+
             return matchCount;
         }
 
@@ -491,20 +513,20 @@ namespace plugins.regexgrep
         private int ProcessMatches(ReadOnlySpan<char> span, int maxIndex, string path, char[] buffer, int totalChars, int chunkStartLine)
         {
             int count = 0;
-            
+
             foreach (var match in RegexEngine!.EnumerateMatches(span))
             {
                 if (match.Index >= maxIndex)
                     break;
-                
+
                 // Calcola il numero di riga del match
                 int lineNumber = chunkStartLine + CountLines(span[..match.Index]);
-                
+
                 // Estrae e stampa il match con contesto
                 ExtractAndPrintMatch(path, buffer, totalChars, match.Index, match.Length, lineNumber);
                 count++;
             }
-            
+
             return count;
         }
 
@@ -518,8 +540,8 @@ namespace plugins.regexgrep
         private void ExtractAndPrintMatch(string path, char[] buffer, int totalChars, int matchIndex, int matchLength, int lineNumber)
         {
             ReadOnlySpan<char> dataSpan = buffer.AsSpan(0, totalChars);
-            
-            // Affittiamo spazio per costruire la stringa di output
+
+            // affitto spazio per costruire la stringa di output
             IMemoryOwner<char> memoryOwner = MemoryPool<char>.Shared.Rent(PathRentBytes);
             Span<char> outputSpan = memoryOwner.Memory.Span;
             int outputLength = 0;
@@ -533,15 +555,15 @@ namespace plugins.regexgrep
             "[Cyan]".AsSpan().AppendTo(outputSpan, ref outputLength);
             Path.GetFileName(pathSpan).AppendTo(outputSpan, ref outputLength);
             "[/]\n[Green]# [Yellow]".AsSpan().AppendTo(outputSpan, ref outputLength);
-            
+
             if (lineNumber.TryFormat(outputSpan[outputLength..], out int charsWritten))
             {
                 outputLength += charsWritten;
             }
-            
+
             ":[/] ".AsSpan().AppendTo(outputSpan, ref outputLength);
-            
-            // Estrai il contesto del match
+
+            // estraggo il contesto del match
             int contextLen = ExtractMatchContext(
                 dataSpan,
                 matchIndex,
@@ -549,7 +571,7 @@ namespace plugins.regexgrep
                 outputSpan[outputLength..]);
 
             outputLength += contextLen;
-            
+
             // Footer
             "\n[DarkGray]*\n*[/]".AsSpan().AppendTo(outputSpan, ref outputLength);
 
@@ -570,60 +592,60 @@ namespace plugins.regexgrep
             int start = Math.Max(0, matchIndex - MaxContextSize);
             int endMatch = matchIndex + matchLength;
             int end = Math.Min(endMatch + MaxContextSize, span.Length);
-            
+
             // Trova i confini di riga a sinistra
             var leftSpan = span[start..matchIndex];
             int preNewLine = leftSpan.LastIndexOf('\n');
             int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
             bool truncatedLeft = preNewLine == -1 && start > 0;
-            
+
             // Trova i confini di riga a destra
             var rightSpan = span[endMatch..end];
             int postNewLine = rightSpan.IndexOf('\n');
             int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
             if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
             bool truncatedRight = postNewLine == -1 && end < span.Length;
-            
+
             // Assegna le porzioni esatte
             var exactLeft = span[actualStart..matchIndex];
             var exactMatch = span[matchIndex..endMatch];
             var exactRight = span[endMatch..actualEnd];
-            
+
             // Buffer per costruire l'output: 14 = 6 (... * 2) + 5 ([Red]) + 3 ([/])
             int maxSize = (actualEnd - actualStart) + 14;
             Span<char> buffer = maxSize <= 1024 ? stackalloc char[maxSize] : new char[maxSize];
             int pos = 0;
-            
+
             // Contesto sinistro
             if (truncatedLeft)
             {
                 "...".AsSpan().CopyTo(buffer[pos..]);
                 pos += 3;
             }
-            
+
             exactLeft.CopyTo(buffer[pos..]);
             pos += exactLeft.Length;
-            
+
             // Match evidenziato in rosso
             "[Red]".AsSpan().CopyTo(buffer[pos..]);
             pos += 5;
-            
+
             exactMatch.CopyTo(buffer[pos..]);
             pos += exactMatch.Length;
-            
+
             "[/]".AsSpan().CopyTo(buffer[pos..]);
             pos += 3;
-            
+
             // Contesto destro
             exactRight.CopyTo(buffer[pos..]);
             pos += exactRight.Length;
-            
+
             if (truncatedRight)
             {
                 "...".AsSpan().CopyTo(buffer[pos..]);
                 pos += 3;
             }
-            
+
             // Copia il buffer nell'output
             buffer[..pos].CopyTo(output);
             return pos;
@@ -665,7 +687,7 @@ namespace plugins.regexgrep
         #region Utilities
 
         /// <summary>
-        /// Conta le newline nello span di char.
+        /// Conta le newline nello span di char (SIMD)
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int CountLines(ReadOnlySpan<char> span)
