@@ -27,6 +27,9 @@ public static class NativeIO
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern unsafe bool DeleteFileW(char* lpFileName);
 
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern unsafe bool SetFileAttributesW(char* lpFileName, uint dwFileAttributes);
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern unsafe bool CreateDirectoryW(char* lpPathName, IntPtr lpSecurityAttributes);
@@ -49,20 +52,26 @@ public static class NativeIO
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern unsafe bool MoveFileExW(char* lpExistingFileName, char* lpNewFileName, uint dwFlags);
 
+    // --- ERRORI ---
+    private const int ERROR_ACCESS_DENIED = 5;
+
     // --- Metodi Pubblici ---
 
     /// <summary>
     /// Elimina un file dal disco.
     /// Zero allocazioni GC se <paramref name="filePath"/> termina già con '\0'.
+    /// In caso di ERROR_ACCESS_DENIED (5) tenta di rimuovere gli attributi
+    /// restrictivi (readonly/system/hidden) prima di un secondo tentativo.
     /// </summary>
     /// <param name="filePath">Percorso del file da eliminare.</param>
-    /// <param name="throwOnError">se true, lancia NativeIOException in caso di errori</param>
+    /// <param name="throwOnError">Se true, lancia NativeIOException in caso di errori.</param>
     /// <returns>true se l'operazione ha successo.</returns>
     /// <exception cref="NativeIOException">
     /// Lanciata quando:
     /// - ERROR_FILE_NOT_FOUND (2): Il file non esiste.
     /// - ERROR_PATH_NOT_FOUND (3): La directory nel percorso non esiste.
-    /// - ERROR_ACCESS_DENIED (5): Permessi insufficienti o file in uso.
+    /// - ERROR_ACCESS_DENIED (5): Permessi insufficienti o file in uso anche dopo
+    ///   il tentativo di rimozione attributi.
     /// </exception>
     public static unsafe bool DeleteFile(ReadOnlySpan<char> filePath, bool throwOnError = true)
     {
@@ -84,12 +93,31 @@ public static class NativeIO
 
             fixed (char* ptr = span)
             {
-                bool result = DeleteFileW(ptr);
-                if (!result && throwOnError)
+                if (DeleteFileW(ptr))
+                    return true;
+
+                int error = Marshal.GetLastWin32Error();
+
+                // # Retry: rimuovo attributi restrittivi e riprova
+                if (error == ERROR_ACCESS_DENIED)
                 {
-                    ThrowNativeError(Marshal.GetLastWin32Error(), filePath, default, "eliminazione");
+                    // ignoro deliberatamente il risultato di SetFileAttributesW:
+                    // se fallisce, il secondo DeleteFileW restituira comunque errore
+                    // gestirò quello.
+                    SetFileAttributesW(ptr, FILE_ATTRIBUTE_NORMAL);
+
+                    if (DeleteFileW(ptr))
+                        return true;
+
+                    // aggiorno l'errore con quello del secondo tentativo
+                    // (potrebbe essere diverso dal 5 originale, es. file locked)
+                    error = Marshal.GetLastWin32Error();
                 }
-                return result;
+
+                if (throwOnError)
+                    ThrowNativeError(error, filePath, default, "eliminazione");
+
+                return false;
             }
         }
         finally
