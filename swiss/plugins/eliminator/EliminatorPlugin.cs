@@ -301,7 +301,7 @@ namespace plugins.eliminator
                                 localFlushDropped++;
                                 localFlushBytes += item.Length;
 
-                                NativeIO.DeleteFile(item.AsPathSpan(), !_throwErrorOnDelete);
+                                NativeIO.DeleteFile(item.AsPathSpan(), _throwErrorOnDelete);
 
                                 // flush dell'array
                                 if ((localFlushDropped & FlushMask) == 0)
