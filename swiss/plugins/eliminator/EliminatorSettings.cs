@@ -32,6 +32,9 @@ namespace plugins.eliminator
         [Option("silence|s", "Non mostrare la UI di progressione a video")]
         public bool Silence { get; set; }
 
+        [Option("ignore-errors|ie", "Se attivo ignora gli errori di cancellazione dei file")]
+        public bool IgnoreErrors { get; set; } = false;
+
         [Option("threads|t", "Specifica il numero massimo di thread (default: numero di core della CPU)")]
         public int? Threads { get; set; }
 

@@ -20,6 +20,7 @@ namespace plugins.eliminator
         // 
         private int FlushMask = 127;
         private EliminationState State = new();
+        private bool _throwErrorOnDelete = true;
 
         // # Stato interno
         /// <summary>
@@ -148,6 +149,8 @@ namespace plugins.eliminator
             // Inizializza gli array per i contatori
             State.DroppedFilesCountList = new long[State.ThreadNumber * CounterStride];
             State.BytesSavedList = new long[State.ThreadNumber * CounterStride];
+
+            _throwErrorOnDelete = !settings.IgnoreErrors;
 
             return true;
         }
@@ -298,7 +301,7 @@ namespace plugins.eliminator
                                 localFlushDropped++;
                                 localFlushBytes += item.Length;
 
-                                NativeIO.DeleteFile(item.AsPathSpan());
+                                NativeIO.DeleteFile(item.AsPathSpan(), !_throwErrorOnDelete);
 
                                 // flush dell'array
                                 if ((localFlushDropped & FlushMask) == 0)

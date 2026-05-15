@@ -56,6 +56,7 @@ public static class NativeIO
     /// Zero allocazioni GC se <paramref name="filePath"/> termina già con '\0'.
     /// </summary>
     /// <param name="filePath">Percorso del file da eliminare.</param>
+    /// <param name="throwOnError">se true, lancia NativeIOException in caso di errori</param>
     /// <returns>true se l'operazione ha successo.</returns>
     /// <exception cref="NativeIOException">
     /// Lanciata quando:
@@ -63,7 +64,7 @@ public static class NativeIO
     /// - ERROR_PATH_NOT_FOUND (3): La directory nel percorso non esiste.
     /// - ERROR_ACCESS_DENIED (5): Permessi insufficienti o file in uso.
     /// </exception>
-    public static unsafe bool DeleteFile(ReadOnlySpan<char> filePath)
+    public static unsafe bool DeleteFile(ReadOnlySpan<char> filePath, bool throwOnError = true)
     {
         char[]? rented = null;
         try
@@ -83,10 +84,13 @@ public static class NativeIO
 
             fixed (char* ptr = span)
             {
-                if (!DeleteFileW(ptr))
+                bool result = DeleteFileW(ptr);
+                if (!result && throwOnError)
+                {
                     ThrowNativeError(Marshal.GetLastWin32Error(), filePath, default, "eliminazione");
+                }
+                return result;
             }
-            return true;
         }
         finally
         {
