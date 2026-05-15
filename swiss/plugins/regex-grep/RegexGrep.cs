@@ -1,6 +1,5 @@
 using System.IO.Enumeration;
 using System.Threading.Channels;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Unicode;
 using Microsoft.Win32.SafeHandles;
