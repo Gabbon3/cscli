@@ -223,6 +223,8 @@ public abstract class Plugin
         var options = properties
             .Select(p => new { Prop = p, Attr = p.GetCustomAttribute<OptionAttribute>() })
             .Where(x => x.Attr != null)
+            .OrderBy(x => x.Attr!.Category)
+            .ThenBy(x => x.Attr!.LongName)
             .ToList();
 
         // --- COMPOSIZIONE OUTPUT ---

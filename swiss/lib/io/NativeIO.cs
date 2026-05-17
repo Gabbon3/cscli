@@ -96,7 +96,7 @@ public static class NativeIO
                 if (DeleteFileW(ptr))
                     return true;
 
-                int error = Marshal.GetLastWin32Error();
+                int error = Marshal.GetLastPInvokeError();
 
                 // # Retry: rimuovo attributi restrittivi e riprova
                 if (error == ERROR_ACCESS_DENIED)
@@ -111,7 +111,7 @@ public static class NativeIO
 
                     // aggiorno l'errore con quello del secondo tentativo
                     // (potrebbe essere diverso dal 5 originale, es. file locked)
-                    error = Marshal.GetLastWin32Error();
+                    error = Marshal.GetLastPInvokeError();
                 }
 
                 if (throwOnError)
@@ -167,7 +167,7 @@ public static class NativeIO
                 bool result = RemoveDirectoryW(ptr);
                 if (!result && throwOnError)
                 {
-                    ThrowNativeError(Marshal.GetLastWin32Error(), path, default, "rimozione directory");
+                    ThrowNativeError(Marshal.GetLastPInvokeError(), path, default, "rimozione directory");
                 }
                 return result;
             }
@@ -216,7 +216,7 @@ public static class NativeIO
             {
                 if (!CreateDirectoryW(ptr, IntPtr.Zero))
                 {
-                    int errorCode = Marshal.GetLastWin32Error();
+                    int errorCode = Marshal.GetLastPInvokeError();
                     if (errorCode == 183) // ERROR_ALREADY_EXISTS
                         return true;
 
@@ -277,7 +277,7 @@ public static class NativeIO
                     IntPtr.Zero);
 
                 if (handle.IsInvalid)
-                    ThrowNativeError(Marshal.GetLastWin32Error(), filePath, default, "creazione file");
+                    ThrowNativeError(Marshal.GetLastPInvokeError(), filePath, default, "creazione file");
             }
             return true;
         }
@@ -345,7 +345,7 @@ public static class NativeIO
             fixed (char* pDst = dstSpan)
             {
                 if (!MoveFileExW(pSrc, pDst, flags))
-                    ThrowNativeError(Marshal.GetLastWin32Error(), sourcePath, destinationPath, "spostamento");
+                    ThrowNativeError(Marshal.GetLastPInvokeError(), sourcePath, destinationPath, "spostamento");
             }
             return true;
         }

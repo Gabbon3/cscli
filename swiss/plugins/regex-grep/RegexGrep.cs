@@ -15,7 +15,7 @@ namespace plugins.regexgrep
 {
     class RegexGrepPlugin : Plugin
     {
-        public override string Name => "rgrep";
+        public override string Name => "grep";
         public override string Description => "Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)";
 
         // # stato condiviso tra i metodi
@@ -33,11 +33,17 @@ namespace plugins.regexgrep
         private static readonly int FilesChannelBound = 8192;
         private long TotalMatchCount = 0;
         private long TotalSizeVisited = 0;
-        private long TotalFileVisited = 0;
+        private long TotalFileFounded = 0;
+        private long TotalFileProcessed = 0;
         private const int PathRentBytes = 2048;
         private const int ByteBufferSize = 65536;
         private const int CharBufferSize = 65536;
         private const int ByteOverlapSize = 4096; // circa 1365 char circa nel peggiore dei casi in UTF-8 (1 char max 3 byte)
+        
+        // altre statistiche
+        // -- statistiche sulle scritture del channel
+        private long ChannelWriteSync = 0;
+        private long ChannelWriteAsync = 0;
 
         #region Structs
 
@@ -70,7 +76,7 @@ namespace plugins.regexgrep
             public string Root = string.Empty;
             public string Pattern = string.Empty;
             public HashSet<string> ExcludeDirs = new(StringComparer.OrdinalIgnoreCase);
-            public Channel<string> FilesChannel = Channel.CreateBounded<string>(1);
+            public Channel<GrepFileEntry> FilesChannel = Channel.CreateBounded<GrepFileEntry>(1);
         }
 
         #endregion
@@ -123,17 +129,16 @@ namespace plugins.regexgrep
             }
             // 10. termine esecuzione, calcolo statistiche finali
             TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
-            double seconds = elapsed.TotalSeconds;
-            double totalGB = TotalSizeVisited / 1_073_741_824.0; // 1 GB = 1024^3
-            double gbSec = seconds > 0 ? totalGB / seconds : 0;
             // ---
             if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
             ConsolePlus.WriteBoxHeader($"Ricerca completata", 40);
             ConsolePlus.WriteList([
                 $"Match totali: [Green]{TotalMatchCount:N0}[/]",
-                $"File totali controllati: [Magenta]{TotalFileVisited:N0}[/]",
+                $"File totali trovati: [DarkGray]{TotalFileFounded:N0}[/]",
+                $"File totali processati: [Magenta]{TotalFileProcessed:N0}[/]",
                 $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]",
-                $"Throughput: [Cyan]{gbSec:N2} GB/sec[/]"
+                $"Throughput: [Cyan]{Formatter.Throughput(TotalSizeVisited, elapsed.TotalSeconds)}[/]",
+                $"Scritture Channel: [DarkGray]sync {ChannelWriteSync} - async {ChannelWriteAsync}[/]"
             ]);
             ConsolePlus.WriteHr(40);
         }
@@ -273,7 +278,7 @@ namespace plugins.regexgrep
             RegexEngine = new Regex(State.Pattern, options);
 
             // configuro il channel
-            State.FilesChannel = Channel.CreateBounded<string>(new BoundedChannelOptions(FilesChannelBound)
+            State.FilesChannel = Channel.CreateBounded<GrepFileEntry>(new BoundedChannelOptions(FilesChannelBound)
             {
                 SingleWriter = true,
                 SingleReader = false,
@@ -328,8 +333,14 @@ namespace plugins.regexgrep
                 foreach (var grepFileEntry in enumerable)
                 {
                     if (ct.IsCancellationRequested) break;
-                    TotalFileVisited++;
-                    await State.FilesChannel.Writer.WriteAsync(grepFileEntry.Path, ct);
+                    TotalFileFounded++;
+                    ChannelWriteSync++;
+                    if (!State.FilesChannel.Writer.TryWrite(grepFileEntry))
+                    {
+                        await State.FilesChannel.Writer.WriteAsync(grepFileEntry, ct);
+                        ChannelWriteSync--;
+                        ChannelWriteAsync++;
+                    }
                 }
             }
             finally
@@ -352,19 +363,28 @@ namespace plugins.regexgrep
                     byte[] byteBuffer = new byte[ByteBufferSize];
                     char[] charBuffer = new char[CharBufferSize];
                     long threadMatchCount = 0;
-                    long totalByteSizeVisited = 0;
+                    long localTotalFileProcessed = 0;
+                    long localTotalByteSizeVisited = 0;
 
                     try
                     {
-                        await foreach (var path in State.FilesChannel.Reader.ReadAllAsync(ct))
+                        await foreach (var entry in State.FilesChannel.Reader.ReadAllAsync(ct))
                         {
-                            threadMatchCount += ProcessFile(path, byteBuffer, charBuffer, ref totalByteSizeVisited);
+                            threadMatchCount += ProcessFile(
+                                entry.Path, 
+                                entry.Size, 
+                                byteBuffer, 
+                                charBuffer, 
+                                ref localTotalByteSizeVisited, 
+                                ref localTotalFileProcessed
+                            );
                         }
                     }
                     finally
                     {
                         Interlocked.Add(ref TotalMatchCount, threadMatchCount);
-                        Interlocked.Add(ref TotalSizeVisited, totalByteSizeVisited);
+                        Interlocked.Add(ref TotalFileProcessed, localTotalFileProcessed);
+                        Interlocked.Add(ref TotalSizeVisited, localTotalByteSizeVisited);
                     }
                 }, ct);
             }
@@ -378,7 +398,14 @@ namespace plugins.regexgrep
         /// <summary>
         /// Processa un file convertendo UTF-8 -> UTF-16 e usando Regex.EnumerateMatches (zero-alloc).
         /// </summary>
-        private long ProcessFile(string path, byte[] byteBuffer, char[] charBuffer, ref long totalByteSizeVisited)
+        private long ProcessFile(
+            string path, 
+            long fileLength, 
+            byte[] byteBuffer, 
+            char[] charBuffer, 
+            ref long localTotalByteSizeVisited,
+            ref long localTotalFileProcessed
+        )
         {
             SafeFileHandle? handle = null;
             long matchCount = 0;
@@ -387,9 +414,7 @@ namespace plugins.regexgrep
             {
                 // apro l'handle a basso livello per bypassare l'overhead dell'I/O standard di .NET
                 handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
-                long fileLength = RandomAccess.GetLength(handle);
-                if (fileLength == 0) return 0;
-
+                
                 // stato del lettore a chunk
                 long fileOffset = 0;
                 int leftoverBytes = 0; // byte residui (orfani + overlap) da iniettare nel ciclo successivo
@@ -406,13 +431,15 @@ namespace plugins.regexgrep
 
                     int currentByteLength = bytesRead + leftoverBytes;
                     ReadOnlySpan<byte> byteSpan = byteBuffer.AsSpan(0, currentByteLength);
-                    totalByteSizeVisited += bytesRead; // telemetria: sommo solo i byte freschi appena estratti dal disco
+                    localTotalByteSizeVisited += bytesRead; // telemetria: sommo solo i byte freschi appena estratti dal disco
 
                     // euristica sui file binari: se rilevo un byte nullo (0x00) nel primo blocco, scarto l'intero file
                     if (isFirstChunk)
                     {
                         if (byteSpan.Contains((byte)0)) return 0;
                         isFirstChunk = false;
+                        // se ho superato il primo chunk e non contiene byte nulli allora processero l'intero file
+                        localTotalFileProcessed++;
                     }
 
                     // conversione vettorializzata UTF-8 -> UTF-16 (SIMD, zero-alloc)

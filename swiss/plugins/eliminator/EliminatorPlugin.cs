@@ -306,8 +306,11 @@ namespace plugins.eliminator
                                 // flush dell'array
                                 if ((localFlushDropped & FlushMask) == 0)
                                 {
-                                    State.DroppedFilesCountList[slot] += localFlushDropped;
-                                    State.BytesSavedList[slot] += localFlushBytes;
+                                    long currentDropped = State.DroppedFilesCountList[slot];
+                                    long currentBytes = State.BytesSavedList[slot];
+
+                                    Volatile.Write(ref State.DroppedFilesCountList[slot], currentDropped + localFlushDropped);
+                                    Volatile.Write(ref State.BytesSavedList[slot], currentBytes + localFlushBytes);
 
                                     localFlushDropped = 0;
                                     localFlushBytes = 0;
@@ -320,8 +323,11 @@ namespace plugins.eliminator
                     finally
                     {
                         // invio gli ultimi dati rimasti appesi
-                        State.DroppedFilesCountList[slot] += localFlushDropped;
-                        State.BytesSavedList[slot] += localFlushBytes;
+                        long currentDropped = State.DroppedFilesCountList[slot];
+                        long currentBytes = State.BytesSavedList[slot];
+
+                        Volatile.Write(ref State.DroppedFilesCountList[slot], currentDropped + localFlushDropped);
+                        Volatile.Write(ref State.BytesSavedList[slot], currentBytes + localFlushBytes);
                     }
                 }, ct);
             }

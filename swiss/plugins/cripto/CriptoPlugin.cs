@@ -1,5 +1,4 @@
 ﻿using lib.console;
-using plugins.grep;
 using System.Security.Cryptography;
 using System.Text;
 

@@ -9,7 +9,6 @@ using plugins.eliminator;
 using plugins.count;
 using plugins.mdconverter;
 using plugins.cripto;
-using plugins.grep;
 using plugins.regexgrep;
 using plugins.move;
 // # ----------------------- #
@@ -40,8 +39,7 @@ List<PluginRegistration> plugins = [
     new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
     new("cripto", "Effettua la crittografia su file o cartelle legata all'utente Windows", () => new CriptoPlugin()),
-    new("grep", "Ricerca stringhe multiple con AhoCorasick (limitato ASCII - lavora con i byte grezzi)", () => new GrepPlugin()),
-    new("rgrep", "Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)", () => new RegexGrepPlugin()),
+    new("grep", "Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)", () => new RegexGrepPlugin()),
     new("move", "Tool massivo ad altissime prestazioni per lo spostamento di file e cartelle", () => new MovePlugin()),
 ];
 // # ----------------------- #
