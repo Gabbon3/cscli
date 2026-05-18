@@ -23,7 +23,6 @@ namespace plugins.regexgrep
 
         // # attributi
         private bool IgnoreCase = false;
-        private bool Silence;
         private bool CountOnly = false;
         private int MinMatchCount = 0;
         private int MaxMatchCount = -1;
@@ -208,7 +207,6 @@ namespace plugins.regexgrep
 
             CountOnly = settings.Count;
             IgnoreCase = settings.IgnoreCase;
-            Silence = settings.Silence;
 
             // configuro l'output in base alla formattazione desiderata
             OutputFormat outputFormat = settings.Format switch
