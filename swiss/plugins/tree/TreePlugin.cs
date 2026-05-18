@@ -83,23 +83,23 @@ namespace plugins.tree
                 ct: ct
             );
 
-            // Il Reader è singolo, quindi non abbiamo bisogno di lock o collezioni concorrenti sul dizionario
+            // reader singolo
             await foreach (var item in channel.ReadAllAsync(ct))
             {
                 try
                 {
-                    // Estraiamo la cartella direttamente dall'array char in memoria senza MAI creare una new string()
+                    // estraggo la cartella direttamente dall'array char in memoria senza MAI creare una new string()
                     ReadOnlySpan<char> dirPathSpan = GetNormalizedPathSpan(item, item.IsDirectory);
                     if (dirPathSpan.IsEmpty) continue;
 
                     if (item.IsDirectory)
                     {
-                        // Registra la cartella per assicurarsi che i rami vuoti vengano tracciati
+                        // registro la cartella per assicurarmi che i rami vuoti vengano tracciati
                         GetOrAddNode(lookup, dirPathSpan, rootPath.AsSpan());
                     }
                     else
                     {
-                        // È un file: cerchiamo o aggiungiamo il nodo genitore
+                        // è un file: cerchiamo o aggiungiamo il nodo genitore
                         var parentNode = GetOrAddNode(lookup, dirPathSpan, rootPath.AsSpan());
                         parentNode.LocalSize += item.Length;
                         parentNode.LocalFilesCount++;
@@ -107,19 +107,18 @@ namespace plugins.tree
                 }
                 catch (Exception)
                 {
-                    /* Ignoriamo problemi su file specifici per non arrestare lo stream */
+                    /* ignoro spudoratamente gli errori */
                 }
                 finally
                 {
-                    // Nota: Se modifichi StackFileInfo in futuro con ReleaseBuffer(), aggiorna questa chiamata.
-                    item.Dispose();
+                    item.Dispose(); // rilascio l arraypool preso da stackfileinfo
                 }
             }
 
-            // A scansione terminata, propaghiamo le dimensioni dal basso verso l'alto
+            // quando termino la scansione inizio a fare i conti dal basso
             CalculateTotals(rootDirNode);
 
-            // Costruiamo e filtriamo l'albero visuale da ritornare
+            // costruisco l albero finale da restituire
             var finalTree = BuildFilteredTree(rootDirNode, thresholdBytes);
             return (rootDirNode.TotalSize, finalTree);
         }
