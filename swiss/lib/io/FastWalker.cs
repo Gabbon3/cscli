@@ -126,7 +126,10 @@ namespace lib.io
                                 {
                                     ct.ThrowIfCancellationRequested();
                                     // scriviamo tutti i file nel channel output
-                                    await outputChannel.Writer.WriteAsync(enumerator.Current, ct);
+                                    if (!outputChannel.Writer.TryWrite(enumerator.Current))
+                                    {
+                                        await outputChannel.Writer.WriteAsync(enumerator.Current);
+                                    }
                                 }
                             }
                             catch (UnauthorizedAccessException) { /* Ignoriamo cartelle senza permessi */ }
