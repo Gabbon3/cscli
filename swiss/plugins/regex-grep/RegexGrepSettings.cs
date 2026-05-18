@@ -23,7 +23,7 @@ namespace plugins.regexgrep
 
         [Option("max-count|max", "Se --count attivo, mostra i risultati solo se trova al massimo max-count match")]
         public int MaxCount { get; set; } = -1;
-        
+
         [Option("threads|t", "Numero di thread da usare per la ricerca (default: numero di core)")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 
@@ -38,5 +38,8 @@ namespace plugins.regexgrep
 
         [Option("output-file|o", "Indica il percorso del file dove scrivere i risultati del grep")]
         public string? OutputFile { get; set; }
+
+        [Option("format|f", "Formato di output: console (default), csv, json")]
+        public string? Format { get; set; }
     }
 }

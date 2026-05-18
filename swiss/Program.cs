@@ -19,8 +19,8 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.0.1";
-const string versionDescription = "Eliminator fix";
+const string version = "2.0.2";
+const string versionDescription = "Grep - supporto per csv e json";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -40,7 +40,7 @@ List<PluginRegistration> plugins = [
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
     new("cripto", "Effettua la crittografia su file o cartelle legata all'utente Windows", () => new CriptoPlugin()),
     new("grep", "Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)", () => new RegexGrepPlugin()),
-    new("move", "Tool massivo ad altissime prestazioni per lo spostamento di file e cartelle", () => new MovePlugin()),
+    new("move", "Tool multithreaded per lo spostamento di file e cartelle", () => new MovePlugin()),
 ];
 // # ----------------------- #
 

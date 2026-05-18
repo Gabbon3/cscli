@@ -2,6 +2,7 @@
 using System.Threading.Channels;
 using lib.io;
 using lib.utils;
+using lib.utils.span;
 using lib.console;
 using lib.io.stack;
 using Spectre.Console;
@@ -15,7 +16,7 @@ namespace plugins.move
     class MovePlugin : Plugin
     {
         public override string Name => "move";
-        public override string Description => "Tool massivo ad altissime prestazioni per lo spostamento di file e cartelle";
+        public override string Description => "Tool multithreaded per lo spostamento di file e cartelle";
 
         // dimensione padding per prevenire false-sharing su MovedFilesCountList
         private const int CounterStride = 8;

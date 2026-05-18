@@ -2,6 +2,7 @@
 using System.Threading.Channels;
 using lib.io;
 using lib.utils;
+using lib.utils.span;
 using lib.console;
 using lib.io.stack;
 using Spectre.Console;

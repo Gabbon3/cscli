@@ -1,5 +1,4 @@
-using System.Buffers;
-using lib.utils;
+using lib.utils.span;
 
 namespace lib.console;
 

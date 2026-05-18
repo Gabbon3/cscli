@@ -29,17 +29,18 @@ namespace plugins.regexgrep
         private int MaxMatchCount = -1;
         private Regex? RegexEngine;
         private FastPrinter? _fastPrinter;
-        private static readonly int MaxContextSize = 50;
+        private const int MaxBoundContextSize = 50;
+        private const int OutputBufferSize = 16384; // 16 KB per l'output formattato
+        private const int MaxMatchSize = 400; // Limite massimo di caratteri stampabili per il singolo match
         private static readonly int FilesChannelBound = 8192;
         private long TotalMatchCount = 0;
         private long TotalSizeVisited = 0;
         private long TotalFileFounded = 0;
         private long TotalFileProcessed = 0;
-        private const int PathRentBytes = 2048;
         private const int ByteBufferSize = 65536;
         private const int CharBufferSize = 65536;
         private const int ByteOverlapSize = 4096; // circa 1365 char circa nel peggiore dei casi in UTF-8 (1 char max 3 byte)
-        
+
         // altre statistiche
         // -- statistiche sulle scritture del channel
         private long ChannelWriteSync = 0;
@@ -209,6 +210,26 @@ namespace plugins.regexgrep
             IgnoreCase = settings.IgnoreCase;
             Silence = settings.Silence;
 
+            // configuro l'output in base alla formattazione desiderata
+            OutputFormat outputFormat = settings.Format switch
+            {
+                "csv" => OutputFormat.Csv,
+                "json" => OutputFormat.Console,
+                _ => OutputFormat.Console
+            };
+            GrepOutput.Configure(outputFormat);
+
+            // stampo l'header solo per il caso del CSV
+            if (outputFormat == OutputFormat.Csv)
+            {
+                // Usiamo lo stesso delimitatore (;) configurato nel formatter
+                string header = CountOnly
+                    ? "Path;Count\n"
+                    : "Path;Line;Column;Length;PreMatch;Match;PostMatch\n";
+
+                _fastPrinter.TryPost(header);
+            }
+
             return true;
         }
 
@@ -362,6 +383,8 @@ namespace plugins.regexgrep
                 {
                     byte[] byteBuffer = new byte[ByteBufferSize];
                     char[] charBuffer = new char[CharBufferSize];
+                    // buffer per la formattazione di output
+                    char[] outputBuffer = new char[OutputBufferSize];
                     long threadMatchCount = 0;
                     long localTotalFileProcessed = 0;
                     long localTotalByteSizeVisited = 0;
@@ -371,11 +394,12 @@ namespace plugins.regexgrep
                         await foreach (var entry in State.FilesChannel.Reader.ReadAllAsync(ct))
                         {
                             threadMatchCount += ProcessFile(
-                                entry.Path, 
-                                entry.Size, 
-                                byteBuffer, 
-                                charBuffer, 
-                                ref localTotalByteSizeVisited, 
+                                entry.Path,
+                                entry.Size,
+                                byteBuffer,
+                                charBuffer,
+                                outputBuffer,
+                                ref localTotalByteSizeVisited,
                                 ref localTotalFileProcessed
                             );
                         }
@@ -399,10 +423,11 @@ namespace plugins.regexgrep
         /// Processa un file convertendo UTF-8 -> UTF-16 e usando Regex.EnumerateMatches (zero-alloc).
         /// </summary>
         private long ProcessFile(
-            string path, 
-            long fileLength, 
-            byte[] byteBuffer, 
-            char[] charBuffer, 
+            string path,
+            long fileLength,
+            byte[] byteBuffer,
+            char[] charBuffer,
+            char[] outputBuffer,
             ref long localTotalByteSizeVisited,
             ref long localTotalFileProcessed
         )
@@ -414,7 +439,7 @@ namespace plugins.regexgrep
             {
                 // apro l'handle a basso livello per bypassare l'overhead dell'I/O standard di .NET
                 handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, FileOptions.SequentialScan);
-                
+
                 // stato del lettore a chunk
                 long fileOffset = 0;
                 int leftoverBytes = 0; // byte residui (orfani + overlap) da iniettare nel ciclo successivo
@@ -464,7 +489,7 @@ namespace plugins.regexgrep
                     }
                     else
                     {
-                        matchCount += ProcessMatches(searchSpan, searchEndIndex, path, charBuffer, charsWritten, totalLines);
+                        matchCount += ProcessMatches(searchSpan, searchEndIndex, path, totalLines, outputBuffer);
                     }
 
                     // recupero i byte "orfani" (codifiche UTF-8 multi-byte spezzate dal taglio del chunk)
@@ -503,7 +528,7 @@ namespace plugins.regexgrep
 
                 if (satisfiesMin && satisfiesMax)
                 {
-                    PrintCountResult(path, matchCount);
+                    PrintCountResult(path, matchCount, outputBuffer);
                 }
                 else
                 {
@@ -536,145 +561,68 @@ namespace plugins.regexgrep
         /// <summary>
         /// Processa i match ed estrae il contesto per la stampa.
         /// </summary>
-        private int ProcessMatches(ReadOnlySpan<char> span, int maxIndex, string path, char[] buffer, int totalChars, int chunkStartLine)
+        private int ProcessMatches(
+            ReadOnlySpan<char> span,
+            int maxIndex,
+            string path,
+            int chunkStartLine,
+            char[] outputBuffer
+        )
         {
             int count = 0;
 
             foreach (var match in RegexEngine!.EnumerateMatches(span))
             {
-                if (match.Index >= maxIndex)
-                    break;
+                if (match.Index >= maxIndex) break;
 
-                // Calcola il numero di riga del match
-                int lineNumber = chunkStartLine + CountLines(span[..match.Index]);
+                // 1. Calcolo Riga e Colonna
+                var spanBeforeMatch = span[..match.Index];
+                int lineNumber = chunkStartLine + CountLines(spanBeforeMatch);
 
-                // Estrae e stampa il match con contesto
-                ExtractAndPrintMatch(path, buffer, totalChars, match.Index, match.Length, lineNumber);
+                // La colonna è la distanza dall'ultimo \n all'inizio del match
+                int lastNewLineBeforeMatch = spanBeforeMatch.LastIndexOf('\n');
+                // Se non c'è \n, siamo all'inizio del chunk. Aggiungiamo 1 per avere la colonna 1-based (umana)
+                int column = match.Index - (lastNewLineBeforeMatch != -1 ? lastNewLineBeforeMatch : -1);
+
+                ReadOnlySpan<char> exactLeft = default;
+                ReadOnlySpan<char> exactMatch = default;
+                ReadOnlySpan<char> exactRight = default;
+
+                // 2. estraggo il contesto SOLO se il match è gestibile
+                if (match.Length <= MaxMatchSize)
+                {
+                    int start = Math.Max(0, match.Index - MaxBoundContextSize);
+                    int endMatch = match.Index + match.Length;
+                    int end = Math.Min(endMatch + MaxBoundContextSize, span.Length);
+
+                    int preNewLine = span[start..match.Index].LastIndexOf('\n');
+                    int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
+
+                    int postNewLine = span[endMatch..end].IndexOf('\n');
+                    int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
+                    if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
+
+                    exactLeft = span[actualStart..match.Index];
+                    exactMatch = span[match.Index..endMatch];
+                    exactRight = span[endMatch..actualEnd];
+                }
+
+                // costruisco la struct (se il match era gigante, left/match/right SARANNO VUOTI)
+                var matchData = new GrepMatchData(path, exactLeft, exactMatch, exactRight, lineNumber, column, match.Length);
+
+                int writtenChars = GrepOutput.FormatMatch(ref matchData, outputBuffer);
+
+                if (writtenChars > 0)
+                {
+                    var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
+                    outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
+                    _fastPrinter!.Post(memoryOwner, writtenChars);
+                }
+
                 count++;
             }
 
             return count;
-        }
-
-        #endregion
-        #region Extract & Print
-
-        /// <summary>
-        /// Estrae il contesto del match e lo stampa tramite FastPrinter (zero-alloc).
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ExtractAndPrintMatch(string path, char[] buffer, int totalChars, int matchIndex, int matchLength, int lineNumber)
-        {
-            ReadOnlySpan<char> dataSpan = buffer.AsSpan(0, totalChars);
-
-            // affitto spazio per costruire la stringa di output
-            IMemoryOwner<char> memoryOwner = MemoryPool<char>.Shared.Rent(PathRentBytes);
-            Span<char> outputSpan = memoryOwner.Memory.Span;
-            int outputLength = 0;
-
-            ReadOnlySpan<char> pathSpan = path.AsSpan();
-
-            // Header: path e numero riga
-            "[Green]#[/] [DarkGray]".AsSpan().AppendTo(outputSpan, ref outputLength);
-            Path.GetDirectoryName(pathSpan).AppendTo(outputSpan, ref outputLength);
-            Path.DirectorySeparatorChar.AppendTo(outputSpan, ref outputLength);
-            "[Cyan]".AsSpan().AppendTo(outputSpan, ref outputLength);
-            Path.GetFileName(pathSpan).AppendTo(outputSpan, ref outputLength);
-            "[/]\n[Green]# [Yellow]".AsSpan().AppendTo(outputSpan, ref outputLength);
-
-            if (lineNumber.TryFormat(outputSpan[outputLength..], out int charsWritten))
-            {
-                outputLength += charsWritten;
-            }
-
-            ":[/] ".AsSpan().AppendTo(outputSpan, ref outputLength);
-
-            // estraggo il contesto del match
-            int contextLen = ExtractMatchContext(
-                dataSpan,
-                matchIndex,
-                matchLength,
-                outputSpan[outputLength..]);
-
-            outputLength += contextLen;
-
-            // Footer
-            "\n[DarkGray]*\n*[/]".AsSpan().AppendTo(outputSpan, ref outputLength);
-
-            _fastPrinter!.Post(memoryOwner, outputLength);
-        }
-
-        /// <summary>
-        /// Estrae il contesto attorno al match (lavora su char invece che byte).
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static int ExtractMatchContext(
-            ReadOnlySpan<char> span,
-            int matchIndex,
-            int matchLength,
-            Span<char> output)
-        {
-            // Calcola le posizioni del match
-            int start = Math.Max(0, matchIndex - MaxContextSize);
-            int endMatch = matchIndex + matchLength;
-            int end = Math.Min(endMatch + MaxContextSize, span.Length);
-
-            // Trova i confini di riga a sinistra
-            var leftSpan = span[start..matchIndex];
-            int preNewLine = leftSpan.LastIndexOf('\n');
-            int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
-            bool truncatedLeft = preNewLine == -1 && start > 0;
-
-            // Trova i confini di riga a destra
-            var rightSpan = span[endMatch..end];
-            int postNewLine = rightSpan.IndexOf('\n');
-            int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
-            if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
-            bool truncatedRight = postNewLine == -1 && end < span.Length;
-
-            // Assegna le porzioni esatte
-            var exactLeft = span[actualStart..matchIndex];
-            var exactMatch = span[matchIndex..endMatch];
-            var exactRight = span[endMatch..actualEnd];
-
-            // Buffer per costruire l'output: 14 = 6 (... * 2) + 5 ([Red]) + 3 ([/])
-            int maxSize = (actualEnd - actualStart) + 14;
-            Span<char> buffer = maxSize <= 1024 ? stackalloc char[maxSize] : new char[maxSize];
-            int pos = 0;
-
-            // Contesto sinistro
-            if (truncatedLeft)
-            {
-                "...".AsSpan().CopyTo(buffer[pos..]);
-                pos += 3;
-            }
-
-            exactLeft.CopyTo(buffer[pos..]);
-            pos += exactLeft.Length;
-
-            // Match evidenziato in rosso
-            "[Red]".AsSpan().CopyTo(buffer[pos..]);
-            pos += 5;
-
-            exactMatch.CopyTo(buffer[pos..]);
-            pos += exactMatch.Length;
-
-            "[/]".AsSpan().CopyTo(buffer[pos..]);
-            pos += 3;
-
-            // Contesto destro
-            exactRight.CopyTo(buffer[pos..]);
-            pos += exactRight.Length;
-
-            if (truncatedRight)
-            {
-                "...".AsSpan().CopyTo(buffer[pos..]);
-                pos += 3;
-            }
-
-            // Copia il buffer nell'output
-            buffer[..pos].CopyTo(output);
-            return pos;
         }
 
         #endregion
@@ -684,29 +632,17 @@ namespace plugins.regexgrep
         /// Stampa il conteggio match per file (modalità count-only).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void PrintCountResult(string path, long fileMatchCount)
+        private void PrintCountResult(string path, long fileMatchCount, char[] outputBuffer)
         {
-            IMemoryOwner<char> memoryOwner = MemoryPool<char>.Shared.Rent(PathRentBytes);
-            Span<char> outputSpan = memoryOwner.Memory.Span;
-            int matchLength = 0;
+            var countData = new GrepCountData(path, fileMatchCount);
+            int writtenChars = GrepOutput.FormatCount(ref countData, outputBuffer);
 
-            ReadOnlySpan<char> pathSpan = path.AsSpan();
-
-            "[Green]#[/] [DarkGray]".AsSpan().AppendTo(outputSpan, ref matchLength);
-            Path.GetDirectoryName(pathSpan).AppendTo(outputSpan, ref matchLength);
-            Path.DirectorySeparatorChar.AppendTo(outputSpan, ref matchLength);
-            "[Cyan]".AsSpan().AppendTo(outputSpan, ref matchLength);
-            Path.GetFileName(pathSpan).AppendTo(outputSpan, ref matchLength);
-            "[/]: [Magenta]".AsSpan().AppendTo(outputSpan, ref matchLength);
-
-            if (fileMatchCount.TryFormat(outputSpan[matchLength..], out int charsWritten))
+            if (writtenChars > 0)
             {
-                matchLength += charsWritten;
+                var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
+                outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
+                _fastPrinter!.Post(memoryOwner, writtenChars);
             }
-
-            " match[/]".AsSpan().AppendTo(outputSpan, ref matchLength);
-
-            _fastPrinter!.Post(memoryOwner, matchLength);
         }
 
         #endregion
