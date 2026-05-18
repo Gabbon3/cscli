@@ -9,37 +9,39 @@ namespace plugins.regexgrep
         [Fixed(1, "pattern", "Il pattern regex da ricercare")]
         public string Pattern { get; set; } = string.Empty;
 
-        [Option("silence|s", "Se attivo non mostra i risultati a console")]
+        // --- OPZIONI ---
+
+        [Option("silence|s", "Se attivo non mostra i risultati a console", "Configurazione")]
         public bool Silence { get; set; } = false;
 
-        [Option("ignore-case|i", "Ricerca case insensitive (ASCII)")]
+        [Option("ignore-case|i", "Regex case insensitive", "Configurazione")]
         public bool IgnoreCase { get; set; }
 
-        [Option("count|c", "Restituisce il numero di match per ogni file")]
+        [Option("count|c", "Restituisce il numero di match per ogni file", "Configurazione")]
         public bool Count { get; set; }
 
-        [Option("min-count|min", "Se --count attivo, mostra i risultati solo se trova almeno min-count match")]
+        [Option("count-min|min", "Se --count attivo, mostra i risultati solo se trova almeno n (valore in input) match", "Configurazione")]
         public int MinCount { get; set; } = 1;
 
-        [Option("max-count|max", "Se --count attivo, mostra i risultati solo se trova al massimo max-count match")]
+        [Option("count-max|max", "Se --count attivo, mostra i risultati solo se trova al massimo n (valore in input) match", "Configurazione")]
         public int MaxCount { get; set; } = -1;
 
-        [Option("threads|t", "Numero di thread da usare per la ricerca (default: numero di core)")]
+        [Option("threads|t", "Numero di thread da usare per la ricerca (default: numero di core)", "Configurazione")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 
-        [Option("exclude-dir|ex", "Aggiunge cartelle da escludere (separate da virgola)")]
+        [Option("dir-exclude|ex", "Aggiunge cartelle da escludere (separate da virgola)", "Filtri")]
         public string? ExcludeDirs { get; set; }
 
-        [Option("include-dir|in", "Riabilita cartelle escluse di default (separate da virgola)")]
+        [Option("dir-include|in", "Riabilita cartelle escluse di default (separate da virgola)", "Filtri")]
         public string? IncludeDirs { get; set; }
 
-        [Option("glob|g", "Cerca solo nei file che corrispondono al pattern (es. *.cs,*.txt)")]
+        [Option("glob|g", "Cerca solo nei file che corrispondono al pattern (es. *.cs,*.txt)", "Filtri")]
         public string? Glob { get; set; }
 
-        [Option("output-file|o", "Indica il percorso del file dove scrivere i risultati del grep")]
+        [Option("output-file|o", "Indica il percorso del file dove scrivere i risultati del grep", "Output")]
         public string? OutputFile { get; set; }
 
-        [Option("format|f", "Formato di output: console (default), csv, json")]
+        [Option("format|f", "Formato di output: console (default), csv, json", "Output")]
         public string? Format { get; set; }
     }
 }

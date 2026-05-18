@@ -58,11 +58,17 @@ namespace plugins.tree
 
         private async Task<(long TotalSize, DirectoryNode? Node)> ScanSystemAsync(string rootPath, long thresholdBytes, CancellationToken ct)
         {
-            // Normalizziamo il percorso radice per evitare discrepanze (es. slash finali mancanti o in eccesso)
-            rootPath = TrimTrailingSeparator(Path.GetFullPath(rootPath));
+            // normalizzo il percorso radice convertendolo in Span, trimmandolo e riallocandolo (1 sola volta)
+            rootPath = new string(TrimTrailingSeparator(Path.GetFullPath(rootPath).AsSpan()));
+            ReadOnlySpan<char> rootPathSpan = rootPath.AsSpan();
 
             var nodes = new Dictionary<string, DirNode>(StringComparer.OrdinalIgnoreCase);
-            var rootDirNode = GetOrAddNode(nodes, rootPath, rootPath);
+
+            // Ottengo l'AlternateLookup per cercare nel dizionario usando gli Span
+            var lookup = nodes.GetAlternateLookup<ReadOnlySpan<char>>();
+
+            // creo il nodo radice
+            var rootDirNode = GetOrAddNode(lookup, rootPathSpan, rootPathSpan);
 
             var options = new FastWalkerOptions
             {
@@ -82,18 +88,19 @@ namespace plugins.tree
             {
                 try
                 {
-                    string dirPath = GetNormalizedPath(item, item.IsDirectory);
-                    if (string.IsNullOrEmpty(dirPath)) continue;
+                    // Estraiamo la cartella direttamente dall'array char in memoria senza MAI creare una new string()
+                    ReadOnlySpan<char> dirPathSpan = GetNormalizedPathSpan(item, item.IsDirectory);
+                    if (dirPathSpan.IsEmpty) continue;
 
                     if (item.IsDirectory)
                     {
                         // Registra la cartella per assicurarsi che i rami vuoti vengano tracciati
-                        GetOrAddNode(nodes, dirPath, rootPath);
+                        GetOrAddNode(lookup, dirPathSpan, rootPath.AsSpan());
                     }
                     else
                     {
-                        // È un file: aggiungiamo i dati al suo nodo genitore
-                        var parentNode = GetOrAddNode(nodes, dirPath, rootPath);
+                        // È un file: cerchiamo o aggiungiamo il nodo genitore
+                        var parentNode = GetOrAddNode(lookup, dirPathSpan, rootPath.AsSpan());
                         parentNode.LocalSize += item.Length;
                         parentNode.LocalFilesCount++;
                     }
@@ -104,6 +111,7 @@ namespace plugins.tree
                 }
                 finally
                 {
+                    // Nota: Se modifichi StackFileInfo in futuro con ReleaseBuffer(), aggiorna questa chiamata.
                     item.Dispose();
                 }
             }
@@ -116,56 +124,57 @@ namespace plugins.tree
             return (rootDirNode.TotalSize, finalTree);
         }
 
-        private DirNode GetOrAddNode(Dictionary<string, DirNode> dict, string path, string rootPath)
+        // Metodo aggiornato per ricevere l'AlternateLookup e gli Span
+        private DirNode GetOrAddNode(
+            Dictionary<string, DirNode>.AlternateLookup<ReadOnlySpan<char>> lookup,
+            ReadOnlySpan<char> pathSpan,
+            ReadOnlySpan<char> rootPathSpan)
         {
-            // Se esiste già, lo restituiamo all'istante
-            if (dict.TryGetValue(path, out var node))
+            // FAST PATH: Se la cartella esiste già, O(1) e 0 allocazioni
+            if (lookup.TryGetValue(pathSpan, out var node))
                 return node;
 
-            node = new DirNode { Name = Path.GetFileName(path) };
-            if (string.IsNullOrEmpty(node.Name)) node.Name = path; // Fallback per drive root (es. "C:\")
+            // SLOW PATH: Prima volta che vediamo la cartella.
+            string pathStr = new string(pathSpan);
 
-            dict[path] = node;
+            // Otteniamo il nome del file o cartella tramite Span (100% safe, 0 alloc)
+            ReadOnlySpan<char> nameSpan = Path.GetFileName(pathSpan);
+            string name = nameSpan.IsEmpty ? pathStr : new string(nameSpan);
 
-            // Ricostruiamo la gerarchia verso l'alto fino a collegarci alla radice.
-            // Gestisce perfettamente l'arrivo fuori ordine dai thread paralleli.
-            if (!path.Equals(rootPath, StringComparison.OrdinalIgnoreCase))
+            node = new DirNode { Name = name };
+            lookup.Dictionary[pathStr] = node; // Salviamo
+
+            // Ricostruiamo la gerarchia verso l'alto
+            if (!pathSpan.Equals(rootPathSpan, StringComparison.OrdinalIgnoreCase))
             {
-                string? parentPath = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(parentPath))
+                // Usiamo l'API nativa per estrarre la cartella padre (es. "C:\Windows" -> "C:\") 0 alloc!
+                ReadOnlySpan<char> parentSpan = Path.GetDirectoryName(pathSpan);
+
+                if (!parentSpan.IsEmpty)
                 {
-                    parentPath = TrimTrailingSeparator(parentPath);
-                    var parentNode = GetOrAddNode(dict, parentPath, rootPath);
-                    parentNode.Children[path] = node;
+                    parentSpan = TrimTrailingSeparator(parentSpan);
+
+                    var parentNode = GetOrAddNode(lookup, parentSpan, rootPathSpan);
+                    parentNode.Children[pathStr] = node; // Agganciamo il figlio!
                 }
             }
 
             return node;
         }
 
-        private string GetNormalizedPath(StackFileInfo item, bool isDirectory)
+        private ReadOnlySpan<char> GetNormalizedPathSpan(StackFileInfo item, bool isDirectory)
         {
-            if (isDirectory)
-            {
-                return TrimTrailingSeparator(item.GetFullPath());
-            }
-            else
-            {
-                // Estrarre solo la cartella genitrice di un file minimizza enormemente le allocazioni di stringhe
-                int dirLen = item.PathLength - item.NameLength - 1;
-                if (dirLen <= 0) return string.Empty;
-
-                string parentDir = new string(item.PathBuffer, 0, dirLen);
-                return TrimTrailingSeparator(parentDir);
-            }
+            // Estrae lo span grezzo, poi trimma lo slash finale senza creare stringhe intermedie
+            ReadOnlySpan<char> pathSpan = isDirectory ? item.AsPathSpan() : item.AsDirectorySpan();
+            return TrimTrailingSeparator(pathSpan);
         }
 
-        private string TrimTrailingSeparator(string path)
+        private ReadOnlySpan<char> TrimTrailingSeparator(ReadOnlySpan<char> path)
         {
-            // Rimuove lo slash finale in sicurezza preservando le root di sistema (C:\, /)
-            if (path.Length > 3 && (path.EndsWith(Path.DirectorySeparatorChar) || path.EndsWith(Path.AltDirectorySeparatorChar)))
+            // Rimuove lo slash finale in sicurezza preservando le root di sistema usando slicing veloce
+            if (path.Length > 3 && (path[^1] == Path.DirectorySeparatorChar || path[^1] == Path.AltDirectorySeparatorChar))
             {
-                return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                return path[..^1];
             }
             return path;
         }
@@ -213,17 +222,24 @@ namespace plugins.tree
 
         private void PrintTree(DirectoryNode node, string indent, bool isLast)
         {
+            // 1. Disegno dell'albero con caratteri Unicode continui
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.Write(indent);
-            Console.Write(isLast ? "└── " : "├── ");
+            Console.Write(isLast ? "'-- " : "|-- ");
 
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.Write(node.Name);
-            Console.ResetColor();
+            // 2. Nome della cartella in evidenza
+            ConsolePlus.Write($"[DarkGreen]{node.Name}[/] ", false);
 
-            ConsolePlus.Write($" ([Yellow]{node.NumFiles:n0}[/] - [Blue]{node.NumSubDirs:n0}[/] - [Magenta]{Formatter.Bytes(node.SizeBytes)}[/])");
+            // 3. Formattazione pulita: Dimensione in risalto, file/dirs in secondo piano
+            string size = Formatter.Bytes(node.SizeBytes);
+            string fWord = node.NumFiles == 1 ? "file" : "files";
+            string dWord = node.NumSubDirs == 1 ? "dir" : "dirs";
 
-            indent += isLast ? "    " : "│   ";
+            // Esempio output riga: [ 84.37 GB ] (596 files, 12 dirs)
+            ConsolePlus.Write($"[DarkGray][[/][DarkYellow]{size}[/][DarkGray]] ({node.NumFiles:n0} {fWord}, {node.NumSubDirs:n0} {dWord})[/]");
+
+            // 4. Indentazione per i figli usando la barra dritta Unicode '│'
+            indent += isLast ? "    " : "|   ";
 
             for (int i = 0; i < node.Children.Count; i++)
             {

@@ -5,6 +5,7 @@ namespace lib.console;
 public static class ConsolePlus
 {
     private const string AnsiReset = "\x1b[0m";
+    private const string AnsiBold = "\x1b[1m";
 
     /// <summary>
     /// Stampa una linea # --- #
@@ -79,6 +80,13 @@ public static class ConsolePlus
             if (tagContent.SequenceEqual("/"))
             {
                 Console.Out.Write(AnsiReset);
+                i = closeBracket;
+                lastPos = i + 1;
+            }
+            else if (tagContent.Equals("b", StringComparison.OrdinalIgnoreCase) || 
+                     tagContent.Equals("bold", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Out.Write(AnsiBold);
                 i = closeBracket;
                 lastPos = i + 1;
             }
