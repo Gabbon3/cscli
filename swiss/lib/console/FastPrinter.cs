@@ -61,13 +61,22 @@ public sealed class NullOutput : IFastOutput
 /// </summary>
 public sealed class ConsoleOutput : IFastOutput
 {
-    public static readonly ConsoleOutput Instance = new();
+    private bool ConsoleWriteLine { get; set; } = true;
 
-    private ConsoleOutput() { }
+    // # Singleton per WriteLine (con ritorno a capo)
+    public static readonly ConsoleOutput InstanceWriteLine = new(true);
+    
+    // # Singleton per Write (senza ritorno a capo)
+    public static readonly ConsoleOutput InstanceWrite = new(false);
+
+    private ConsoleOutput(bool consoleWriteLine = true)
+    {
+        ConsoleWriteLine = consoleWriteLine;
+    }
 
     public ValueTask WriteAsync(ReadOnlyMemory<char> memory, CancellationToken ct = default)
     {
-        ConsolePlus.Write(memory);
+        ConsolePlus.Write(memory, ConsoleWriteLine);
         return ValueTask.CompletedTask;
     }
 
@@ -232,7 +241,7 @@ public class FastPrinter
         bool singleWriter = false,
         int capacity = 10_000)
     {
-        public IFastOutput Output { get; } = output ?? ConsoleOutput.Instance;
+        public IFastOutput Output { get; } = output ?? ConsoleOutput.InstanceWriteLine;
         public bool SingleWriter { get; } = singleWriter;
         public int Capacity { get; } = capacity;
     }

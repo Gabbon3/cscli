@@ -257,7 +257,7 @@ namespace plugins.find
         {
             if (item.IsDirectory)
             {
-                ConsolePlus.Write($"[Cyan]{item.AsPathSpan()}[/]");
+                ConsolePlus.Write($"[Magenta]{item.AsPathSpan()}[/]");
             }
             else
             {

@@ -167,8 +167,21 @@ namespace plugins.regexgrep
                 return false;
             }
 
+            // configuro l'output in base alla formattazione desiderata
+            OutputFormat outputFormat = settings.Format switch
+            {
+                "csv" => OutputFormat.Csv,
+                "json" => OutputFormat.Json,
+                _ => OutputFormat.Console
+            };
+            GrepOutput.Configure(outputFormat);
+
             // Setup output
-            IFastOutput printerOutput = ConsoleOutput.Instance;
+            bool outputIsFormatted = outputFormat == OutputFormat.Csv || outputFormat == OutputFormat.Json;
+
+            ConsoleOutput consoleOutput = outputIsFormatted ? ConsoleOutput.InstanceWrite : ConsoleOutput.InstanceWriteLine;
+            IFastOutput printerOutput = consoleOutput;
+
             bool hasOutputFile = !string.IsNullOrWhiteSpace(settings.OutputFile);
 
             if (hasOutputFile)
@@ -181,7 +194,7 @@ namespace plugins.regexgrep
                 }
                 else
                 {
-                    printerOutput = new CompositeOutput(ConsoleOutput.Instance, fileOutput);
+                    printerOutput = new CompositeOutput(consoleOutput, fileOutput);
                 }
             }
             else if (settings.Silence)
@@ -207,15 +220,6 @@ namespace plugins.regexgrep
 
             CountOnly = settings.Count;
             IgnoreCase = settings.IgnoreCase;
-
-            // configuro l'output in base alla formattazione desiderata
-            OutputFormat outputFormat = settings.Format switch
-            {
-                "csv" => OutputFormat.Csv,
-                "json" => OutputFormat.Console,
-                _ => OutputFormat.Console
-            };
-            GrepOutput.Configure(outputFormat);
 
             // stampo l'header solo per il caso del CSV
             if (outputFormat == OutputFormat.Csv)
