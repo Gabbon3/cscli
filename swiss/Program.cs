@@ -19,8 +19,8 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.0.3";
-const string versionDescription = "Grep - supporto per csv e json";
+const string version = "2.0.4";
+const string versionDescription = "Grep - supporto per ricerche fixed";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();

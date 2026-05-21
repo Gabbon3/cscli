@@ -23,6 +23,8 @@ namespace plugins.regexgrep
 
         // # attributi
         private bool IgnoreCase = false;
+        private StringComparison StringComparisonType = StringComparison.Ordinal;
+        private bool FixedPattern = false;
         private bool CountOnly = false;
         private int MinMatchCount = 0;
         private int MaxMatchCount = -1;
@@ -220,6 +222,11 @@ namespace plugins.regexgrep
 
             CountOnly = settings.Count;
             IgnoreCase = settings.IgnoreCase;
+            if (IgnoreCase)
+            {
+                StringComparisonType = StringComparison.OrdinalIgnoreCase;
+            }
+            FixedPattern = settings.FixedPattern;
 
             // stampo l'header solo per il caso del CSV
             if (outputFormat == OutputFormat.Csv)
@@ -292,13 +299,17 @@ namespace plugins.regexgrep
 
         private void InitializeEngine()
         {
-            // configurazione regex ottimizzata:
-            // - Compiled: la regex viene compilata in codice macchina
-            // - NonBacktracking: la regex utilizza un DFA lineare
-            var options = RegexOptions.Compiled | RegexOptions.NonBacktracking;
-            if (IgnoreCase) options |= RegexOptions.IgnoreCase;
+            // se non cerco tramite un pattern fixed allora uso la regex, quindi la inizializzo
+            if (!FixedPattern)
+            {
+                // configurazione regex ottimizzata:
+                // - Compiled: la regex viene compilata in codice macchina
+                // - NonBacktracking: la regex utilizza un DFA lineare
+                var options = RegexOptions.Compiled | RegexOptions.NonBacktracking;
+                if (IgnoreCase) options |= RegexOptions.IgnoreCase;
 
-            RegexEngine = new Regex(State.Pattern, options);
+                RegexEngine = new Regex(State.Pattern, options);
+            }
 
             // configuro il channel
             State.FilesChannel = Channel.CreateBounded<GrepFileEntry>(new BoundedChannelOptions(FilesChannelBound)
@@ -546,17 +557,41 @@ namespace plugins.regexgrep
 
         /// <summary>
         /// Conta i match usando EnumerateMatches (zero-alloc).
+        /// Oppure usando indexof simd se --fixed attivo
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int CountMatches(ReadOnlySpan<char> span, int maxIndex)
         {
             int count = 0;
-            foreach (var match in RegexEngine!.EnumerateMatches(span))
+            // # Regex Classica
+            if (!FixedPattern)
             {
-                if (match.Index >= maxIndex)
-                    break;
-                count++;
+                foreach (var match in RegexEngine!.EnumerateMatches(span))
+                {
+                    if (match.Index >= maxIndex) break;
+                    count++;
+                }
             }
+            else // # IndexOf ottimizzato
+            {
+                int offset = 0;
+                ReadOnlySpan<char> patternSpan = State.Pattern.AsSpan();
+
+                while (true)
+                {
+                    // Cerca la stringa usando l'offset corrente
+                    int idx = span[offset..].IndexOf(patternSpan, StringComparisonType);
+                    // se non trova una mazza chiudo subito
+                    if (idx < 0) break;
+
+                    int matchIndex = offset + idx;
+                    if (matchIndex >= maxIndex) break;
+
+                    count++;
+                    offset = matchIndex + patternSpan.Length;
+                }
+            }
+
             return count;
         }
 
@@ -573,58 +608,109 @@ namespace plugins.regexgrep
         {
             int count = 0;
 
-            foreach (var match in RegexEngine!.EnumerateMatches(span))
+            if (!FixedPattern)
             {
-                if (match.Index >= maxIndex) break;
-
-                // 1. Calcolo Riga e Colonna
-                var spanBeforeMatch = span[..match.Index];
-                int lineNumber = chunkStartLine + CountLines(spanBeforeMatch);
-
-                // La colonna è la distanza dall'ultimo \n all'inizio del match
-                int lastNewLineBeforeMatch = spanBeforeMatch.LastIndexOf('\n');
-                // Se non c'è \n, siamo all'inizio del chunk. Aggiungiamo 1 per avere la colonna 1-based (umana)
-                int column = match.Index - (lastNewLineBeforeMatch != -1 ? lastNewLineBeforeMatch : -1);
-
-                ReadOnlySpan<char> exactLeft = default;
-                ReadOnlySpan<char> exactMatch = default;
-                ReadOnlySpan<char> exactRight = default;
-
-                // 2. estraggo il contesto SOLO se il match è gestibile
-                if (match.Length <= MaxMatchSize)
+                foreach (var match in RegexEngine!.EnumerateMatches(span))
                 {
-                    int start = Math.Max(0, match.Index - MaxBoundContextSize);
-                    int endMatch = match.Index + match.Length;
-                    int end = Math.Min(endMatch + MaxBoundContextSize, span.Length);
-
-                    int preNewLine = span[start..match.Index].LastIndexOf('\n');
-                    int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
-
-                    int postNewLine = span[endMatch..end].IndexOf('\n');
-                    int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
-                    if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
-
-                    exactLeft = span[actualStart..match.Index];
-                    exactMatch = span[match.Index..endMatch];
-                    exactRight = span[endMatch..actualEnd];
+                    // metodo inlinato per massime performance
+                    if (!ProcessSingleMatch(span, match.Index, match.Length, maxIndex, path, chunkStartLine, outputBuffer))
+                        break;
+                    count++;
                 }
+            }
+            else
+            {
+                int offset = 0;
+                ReadOnlySpan<char> patternSpan = State.Pattern.AsSpan();
 
-                // costruisco la struct (se il match era gigante, left/match/right SARANNO VUOTI)
-                var matchData = new GrepMatchData(path, exactLeft, exactMatch, exactRight, lineNumber, column, match.Length);
-
-                int writtenChars = GrepOutput.FormatMatch(ref matchData, outputBuffer);
-
-                if (writtenChars > 0)
+                while (true)
                 {
-                    var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
-                    outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
-                    _fastPrinter!.Post(memoryOwner, writtenChars);
-                }
+                    int idx = span[offset..].IndexOf(patternSpan, StringComparisonType);
+                    // stessa logica del count
+                    if (idx < 0) break;
 
-                count++;
+                    int matchIndex = offset + idx;
+                    // metodo inlinato per massime performance
+                    if (!ProcessSingleMatch(span, matchIndex, patternSpan.Length, maxIndex, path, chunkStartLine, outputBuffer))
+                        break;
+
+                    count++;
+                    offset = matchIndex + patternSpan.Length;
+                }
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// Wrap per il processo di un singolo match, in questo modo gestisco in maniera pulita i due cicli (con regex o meno)
+        /// </summary>
+        /// <param name="span"></param>
+        /// <param name="matchIndex"></param>
+        /// <param name="matchLength"></param>
+        /// <param name="maxIndex"></param>
+        /// <param name="path"></param>
+        /// <param name="chunkStartLine"></param>
+        /// <param name="outputBuffer"></param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ProcessSingleMatch(
+            ReadOnlySpan<char> span,
+            int matchIndex,
+            int matchLength,
+            int maxIndex,
+            string path,
+            int chunkStartLine,
+            char[] outputBuffer
+        )
+        {
+            if (matchIndex >= maxIndex) return false;
+
+            // 1. Calcolo Riga e Colonna
+            var spanBeforeMatch = span[..matchIndex];
+            int lineNumber = chunkStartLine + CountLines(spanBeforeMatch);
+
+            // La colonna è la distanza dall'ultimo \n all'inizio del match
+            int lastNewLineBeforeMatch = spanBeforeMatch.LastIndexOf('\n');
+            // Se non c'è \n, siamo all'inizio del chunk. Aggiungiamo 1 per avere la colonna 1-based (umana)
+            int column = matchIndex - (lastNewLineBeforeMatch != -1 ? lastNewLineBeforeMatch : -1);
+
+            ReadOnlySpan<char> exactLeft = default;
+            ReadOnlySpan<char> exactMatch = default;
+            ReadOnlySpan<char> exactRight = default;
+
+            // 2. estraggo il contesto SOLO se il match è gestibile
+            if (matchLength <= MaxMatchSize)
+            {
+                int start = Math.Max(0, matchIndex - MaxBoundContextSize);
+                int endMatch = matchIndex + matchLength;
+                int end = Math.Min(endMatch + MaxBoundContextSize, span.Length);
+
+                int preNewLine = span[start..matchIndex].LastIndexOf('\n');
+                int actualStart = preNewLine != -1 ? start + preNewLine + 1 : start;
+
+                int postNewLine = span[endMatch..end].IndexOf('\n');
+                int actualEnd = postNewLine != -1 ? endMatch + postNewLine : end;
+                if (actualEnd > 0 && span[actualEnd - 1] == '\r') actualEnd--;
+
+                exactLeft = span[actualStart..matchIndex];
+                exactMatch = span[matchIndex..endMatch];
+                exactRight = span[endMatch..actualEnd];
+            }
+
+            // costruisco la struct (se il match era gigante, left/match/right SARANNO VUOTI)
+            var matchData = new GrepMatchData(path, exactLeft, exactMatch, exactRight, lineNumber, column, matchLength);
+
+            int writtenChars = GrepOutput.FormatMatch(ref matchData, outputBuffer);
+
+            if (writtenChars > 0)
+            {
+                var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
+                outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
+                _fastPrinter!.Post(memoryOwner, writtenChars);
+            }
+
+            return true;
         }
 
         #endregion

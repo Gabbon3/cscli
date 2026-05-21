@@ -17,6 +17,9 @@ namespace plugins.regexgrep
         [Option("ignore-case|i", "Regex case insensitive", "Configurazione")]
         public bool IgnoreCase { get; set; }
 
+        [Option("fixed|f", "Disabilita la regex, cerca direttamente la stringa", "Configurazione")]
+        public bool FixedPattern { get; set; }
+
         [Option("count|c", "Restituisce il numero di match per ogni file", "Configurazione")]
         public bool Count { get; set; }
 
@@ -41,7 +44,7 @@ namespace plugins.regexgrep
         [Option("output-file|o", "Indica il percorso del file dove scrivere i risultati del grep", "Output")]
         public string? OutputFile { get; set; }
 
-        [Option("format|f", "Formato di output: console (default), csv, json", "Output")]
+        [Option("format|F", "Formato di output: console (default), csv, json", "Output")]
         public string? Format { get; set; }
     }
 }

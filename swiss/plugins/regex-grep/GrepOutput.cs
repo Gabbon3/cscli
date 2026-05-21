@@ -278,13 +278,12 @@ public static class GrepOutput
         int pos = 0;
 
         // formattazione path
-        "[Green]#[/] ".AsSpan().AppendTo(output, ref pos);
         FormatFilePath(data.Path, output, ref pos);
         "[/]: [Magenta]".AsSpan().AppendTo(output, ref pos);
 
         if (data.Count.TryFormat(output[pos..], out int countChars)) pos += countChars;
 
-        " match[/]\n".AsSpan().AppendTo(output, ref pos);
+        "[/]".AsSpan().AppendTo(output, ref pos);
 
         return pos;
     }
@@ -304,7 +303,7 @@ public static class GrepOutput
     private static void FormatFilePath(ReadOnlySpan<char> path, Span<char> output, ref int pos)
     {
         // percorso in grigio
-        "[Green]#[/] [DarkGray]".AsSpan().AppendTo(output, ref pos);
+        "[DarkGray]".AsSpan().AppendTo(output, ref pos);
         Path.GetDirectoryName(path).AppendTo(output, ref pos);
         Path.DirectorySeparatorChar.AppendTo(output, ref pos);
         // nome file in ciano
