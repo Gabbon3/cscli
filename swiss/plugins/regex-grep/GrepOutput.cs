@@ -243,10 +243,10 @@ public static class GrepOutput
     private static int FormatMatchConsole(ref GrepMatchData data, Span<char> output)
     {
         int pos = 0;
-
-        "[Green]#[/] [DarkGray]".AsSpan().AppendTo(output, ref pos);
-        data.Path.AppendTo(output, ref pos);
-
+        // formattazione path
+        "[Green]#[/] ".AsSpan().AppendTo(output, ref pos);
+        FormatFilePath(data.Path, output, ref pos);
+        // numero di riga e numero di colonna in giallo
         "[/]\n[Green]# [Yellow]".AsSpan().AppendTo(output, ref pos);
         data.LineNumber.AppendTo(output, ref pos);
         ":".AsSpan().AppendTo(output, ref pos);
@@ -277,8 +277,9 @@ public static class GrepOutput
     {
         int pos = 0;
 
-        "[Green]#[/] [Cyan]".AsSpan().AppendTo(output, ref pos);
-        data.Path.AppendTo(output, ref pos);
+        // formattazione path
+        "[Green]#[/] ".AsSpan().AppendTo(output, ref pos);
+        FormatFilePath(data.Path, output, ref pos);
         "[/]: [Magenta]".AsSpan().AppendTo(output, ref pos);
 
         if (data.Count.TryFormat(output[pos..], out int countChars)) pos += countChars;
@@ -286,6 +287,29 @@ public static class GrepOutput
         " match[/]\n".AsSpan().AppendTo(output, ref pos);
 
         return pos;
+    }
+    #endregion
+
+    #region help
+
+    /// <summary>
+    /// Formatta il percorso del file:
+    /// in grigio la cartella
+    /// in ciano il nome file
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="output"></param>
+    /// <param name="pos"></param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void FormatFilePath(ReadOnlySpan<char> path, Span<char> output, ref int pos)
+    {
+        // percorso in grigio
+        "[Green]#[/] [DarkGray]".AsSpan().AppendTo(output, ref pos);
+        Path.GetDirectoryName(path).AppendTo(output, ref pos);
+        Path.DirectorySeparatorChar.AppendTo(output, ref pos);
+        // nome file in ciano
+        "[Cyan]".AsSpan().AppendTo(output, ref pos);
+        Path.GetFileName(path).AppendTo(output, ref pos);
     }
     #endregion
 }

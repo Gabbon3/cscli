@@ -4,9 +4,6 @@ using System.Threading.Channels;
 
 namespace lib.console.fastprinter;
 
-#region Esempi
-
-#endregion
 #region Interface
 /// <summary>
 /// Interfaccia per qualsiasi destinazione di output supportata da FastPrinter.
@@ -104,12 +101,10 @@ public sealed class FileOutput : IFastOutput
     /// Dimensione del buffer di StreamWriter in caratteri (default 64 KB).
     /// Buffer più grandi riducono le syscall ma aumentano la latenza prima del flush.
     /// </param>
-    /// <param name="encoding">Encoding da usare (default UTF-8 senza BOM).</param>
     public FileOutput(
         string path,
         bool append = false,
-        int fileBufferSize = 64 * 1024,
-        System.Text.Encoding? encoding = null)
+        int fileBufferSize = 64 * 1024)
     {
         var fs = new FileStream(
             path,
@@ -123,7 +118,7 @@ public sealed class FileOutput : IFastOutput
 
         _writer = new StreamWriter(
             fs,
-            encoding: encoding ?? new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            encoding: new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             bufferSize: fileBufferSize,
             leaveOpen: false)
         {
