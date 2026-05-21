@@ -116,7 +116,9 @@ public sealed class FileOutput : IFastOutput
             append ? FileMode.Append : FileMode.Create,
             FileAccess.Write,
             FileShare.Read,
-            bufferSize: 4096, // buffer del FileStream (I/O kernel)
+            // perche 1 se il buffer è da 64KB? cosi bypassiamo il buffer del filestream e scriviamo direttamente sul disco
+            // in noi gia ottimizziamo il flush manualmente (channel a 0) e ogni 64KB bytes scritti nello streamwriter
+            bufferSize: 1, // buffer del FileStream (I/O kernel)
             useAsync: true); // abilita I/O asincrono a livello OS
 
         _writer = new StreamWriter(
