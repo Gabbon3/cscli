@@ -19,7 +19,7 @@ namespace plugins.find
         {
             public string Root = string.Empty;
             public string? Pattern;
-            public bool Recurse = true;
+            public bool Recurse = false;
             public bool IsRanking = false;
             public int MatchCount = 0;
 
@@ -88,7 +88,7 @@ namespace plugins.find
 
             State.Root = root;
             State.Pattern = ParseMatchPattern(settings.Pattern);
-            State.Recurse = !settings.NoRecurseSubdirectories;
+            State.Recurse = settings.RecurseSubdirectories;
             return true;
         }
 

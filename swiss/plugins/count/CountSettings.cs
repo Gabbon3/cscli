@@ -25,13 +25,13 @@ namespace plugins.count
         public bool IgnoreCase { get; set; }
 
         // --- OPZIONI CON VALORE ---
-        [Option("pattern|p", "Filtra i file/cartelle in base al nome")]
+        [Option(CliMeta.FilePatternFlag, CliMeta.FilePatternDesc, "Filtri")]
         public string? Pattern { get; set; }
 
-        [Option("newer-than|n", "Conta solo gli elementi modificati da questa data in poi")]
+        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
         public DateTime? Since { get; set; }
 
-        [Option("older-than|o", "Conta solo gli elementi più vecchi di questa data/età")]
+        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
         public DateTime? OlderThan { get; set; }
     }
 }

@@ -41,10 +41,10 @@ namespace plugins.eliminator
         public bool IncludeHidden { get; set; } = false;
         
 
-        [Option("newer-than|n", "Colpisce solo i file modificati da questa data in poi", "Filtri")]
+        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
         public DateTime? Since { get; set; }
 
-        [Option("older-than|o", "Colpisce solo i file più vecchi di questa data/età", "Filtri")]
+        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
         public DateTime? OlderThan { get; set; }
     }
 }

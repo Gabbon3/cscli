@@ -31,7 +31,7 @@ namespace plugins.regexgrep
         [Option("count-max|max", "Se --count attivo, mostra i risultati solo se trova al massimo n (valore in input) match", "Configurazione")]
         public int MaxCount { get; set; } = -1;
 
-        [Option("threads|t", "Numero di thread da usare per la ricerca (default: numero di core)", "Configurazione")]
+        [Option(CliMeta.ThreadsFlag, CliMeta.ThreadsDesc, "Configurazione")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 
         // filtri
@@ -45,10 +45,10 @@ namespace plugins.regexgrep
         [Option("glob|g", "Cerca solo nei file che corrispondono al pattern (es. *.cs,*.txt)", "Filtri")]
         public string? Glob { get; set; }
 
-        [Option("newer-than|n", "Colpisce solo i file modificati da questa data in poi", "Filtri")]
+        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
         public DateTime? Since { get; set; } 
 
-        [Option("older-than|o", "Colpisce solo i file più vecchi di questa data/età", "Filtri")]
+        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
         public DateTime? OlderThan { get; set; }
 
         // output
