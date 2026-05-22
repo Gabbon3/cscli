@@ -11,6 +11,8 @@ namespace plugins.regexgrep
 
         // --- OPZIONI ---
 
+        // configurazione
+
         [Option("silence|s", "Se attivo non mostra i risultati a console", "Configurazione")]
         public bool Silence { get; set; } = false;
 
@@ -32,6 +34,8 @@ namespace plugins.regexgrep
         [Option("threads|t", "Numero di thread da usare per la ricerca (default: numero di core)", "Configurazione")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 
+        // filtri
+
         [Option("dir-exclude|ex", "Aggiunge cartelle da escludere (separate da virgola)", "Filtri")]
         public string? ExcludeDirs { get; set; }
 
@@ -40,6 +44,14 @@ namespace plugins.regexgrep
 
         [Option("glob|g", "Cerca solo nei file che corrispondono al pattern (es. *.cs,*.txt)", "Filtri")]
         public string? Glob { get; set; }
+
+        [Option("newer-than|n", "Colpisce solo i file modificati da questa data in poi", "Filtri")]
+        public DateTime? Since { get; set; } 
+
+        [Option("older-than|o", "Colpisce solo i file più vecchi di questa data/età", "Filtri")]
+        public DateTime? OlderThan { get; set; }
+
+        // output
 
         [Option("output-file|o", "Indica il percorso del file dove scrivere i risultati del grep", "Output")]
         public string? OutputFile { get; set; }

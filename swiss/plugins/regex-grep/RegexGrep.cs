@@ -332,11 +332,20 @@ namespace plugins.regexgrep
                 ReturnSpecialDirectories = false
             };
 
-            FileSystemFilter? fileFilter = FileFilterFactory.CreateFilter(new FileFilterFactory.FilterOptions
-            {
-                Pattern = settings.Glob,
-                MatchType = FilterFileNameMatchType.Glob,
-            });
+            // # FILE FILTER
+
+            var filterOpts = new FileFilterFactory.FilterOptions(
+                // forzo il glob per semplicita
+                Pattern: settings.Glob,
+                MatchType: FilterFileNameMatchType.Glob,
+                // Filtri sulle date file (modifica)
+                ModifiedBefore: settings.OlderThan,
+                ModifiedAfter: settings.Since
+            );
+
+            FileSystemFilter? fileFilter = FileFilterFactory.CreateFilter(filterOpts);
+
+            // # INIZIO ENUMERAZIONE
 
             var enumerable = new FileSystemEnumerable<GrepFileEntry>(
                 State.Root,
