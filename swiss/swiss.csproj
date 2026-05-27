@@ -17,8 +17,8 @@
 
 		<PublishAot>true</PublishAot>
 		<OptimizationPreference>Speed</OptimizationPreference>
-		<PublishDir>c:\tesisquare\tools</PublishDir>
-		<!-- <PublishDir>c:\users\g2004\desktop\tools</PublishDir> -->
+		<!-- <PublishDir>c:\tesisquare\tools</PublishDir> -->
+		<PublishDir>c:\users\g2004\desktop\tools</PublishDir>
 
 		<StripSymbols>true</StripSymbols>
 		<ConsoleFullSymbolStackTraces>false</ConsoleFullSymbolStackTraces>
@@ -66,5 +66,11 @@
 		<PackageReference Include="Spectre.Console" Version="0.55.2" />
 		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.5" />
 	</ItemGroup>
+
+	<ItemGroup>
+        <ProjectReference Include="..\CliGenerators\CliGenerators.csproj" 
+                          OutputItemType="Analyzer" 
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
 
 </Project>
