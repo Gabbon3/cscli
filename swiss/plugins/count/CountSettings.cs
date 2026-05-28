@@ -1,5 +1,3 @@
-using plugins;
-
 namespace plugins.count
 {
     public class CountSettings
@@ -8,23 +6,23 @@ namespace plugins.count
         [Fixed(0, "percorso", "La directory di partenza (usa '.' per la cartella corrente)")]
         public string TargetPath { get; set; } = string.Empty;
 
-        // --- OPZIONI BOOLEANE ---
-        [Option("directory|d", "Include anche le cartelle nel conteggio finale")]
+        // --- CONFIGURAZIONE ---
+        [Option("directory|d", "Include anche le cartelle nel conteggio finale", "Configurazione")]
         public bool IncludeDirectory { get; set; }
 
-        [Option("hidden|H", "Includi file e cartelle nascoste nella ricerca")]
+        [Option(CliMeta.HiddenFlag, CliMeta.HiddenDesc, "Configurazione")]
         public bool IncludeHidden { get; set; } = false;
 
-        [Option("recursive|r", "Scansiona e conta anche nelle sottocartelle")]
+        [Option("recursive|r", "Scansiona e conta anche nelle sottocartelle", "Configurazione")]
         public bool Recursive { get; set; }
 
-        [Option("fixed|f", "Usa il pattern come stringa esatta invece che come espressione regolare")]
+        [Option("fixed|f", "Usa il pattern come stringa esatta invece che come espressione regolare", "Configurazione")]
         public bool FixedMatch { get; set; }
 
-        [Option("ignore-case|i", "Rende la ricerca del pattern case-insensitive")]
+        [Option("ignore-case|i", "Rende la ricerca del pattern case-insensitive", "Configurazione")]
         public bool IgnoreCase { get; set; }
 
-        // --- OPZIONI CON VALORE ---
+        // --- FILTRI ---
         [Option(CliMeta.FilePatternFlag, CliMeta.FilePatternDesc, "Filtri")]
         public string? Pattern { get; set; }
 

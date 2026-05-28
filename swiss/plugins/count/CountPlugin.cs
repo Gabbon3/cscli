@@ -70,39 +70,20 @@ namespace plugins.count
                 AttributesToSkip = attributesToSkip
             };
 
-            var walkerReader = FastWalker.Walk<CountEntry>(
+            FastWalker.CountResult result = await FastWalker.CountAsync(
                 root,
-                (ref FileSystemEntry entry) => new CountEntry(entry.IsDirectory, entry.Length), // transform crazy
                 fastWalkerOptions,
                 ct
             );
 
-            long filesCount = 0;
-            long dirsCount = 0;
-            long bytesCount = 0;
-
-            // Lettura dal channel
-            await foreach (CountEntry entry in walkerReader.ReadAllAsync(ct))
-            {
-                if (entry.IsDirectory)
-                {
-                    dirsCount++;
-                }
-                else
-                {
-                    filesCount++;
-                    bytesCount += entry.Size;
-                }
-            }
-
             ConsolePlus.Write($"\n[Cyan]#[/] Conteggio completato:");
-            ConsolePlus.Write($"[Cyan]*[/] Files: [Yellow]{filesCount:N0}[/]");
-            ConsolePlus.Write($"[Cyan]*[/] Dimensione: [Green]{Formatter.Bytes(bytesCount)}[/]");
+            ConsolePlus.Write($"[Cyan]*[/] Files: [Yellow]{result.Files:N0}[/]");
+            ConsolePlus.Write($"[Cyan]*[/] Dimensione: [Green]{Formatter.Bytes(result.Bytes)}[/]");
             if (settings.IncludeDirectory)
             {
-                ConsolePlus.Write($"[Cyan]*[/] Cartelle: [Blue]{dirsCount:N0}[/]");
+                ConsolePlus.Write($"[Cyan]*[/] Cartelle: [Blue]{result.Directories:N0}[/]");
             }
-            ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{filesCount + dirsCount:N0}[/]");
+            ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{result.Files + result.Directories:N0}[/]");
         }
 
         public override void Help()

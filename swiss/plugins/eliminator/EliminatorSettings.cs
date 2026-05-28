@@ -37,7 +37,7 @@ namespace plugins.eliminator
         [Option("ignore-case|i", "Rende la ricerca case-insensitive", "Filtri")]
         public bool IgnoreCase { get; set; }
 
-        [Option("hidden|H", "Includi file e cartelle nascoste nella ricerca", "Filtri")]
+        [Option(CliMeta.HiddenFlag, CliMeta.HiddenDesc, "Filtri")]
         public bool IncludeHidden { get; set; } = false;
         
 

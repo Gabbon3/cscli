@@ -15,7 +15,7 @@ namespace plugins.find
         [Option("dirs|d", "Includi le cartelle nella ricerca", "Configurazione")]
         public bool Dirs { get; set; }
 
-        [Option("hidden|H", "Includi file e cartelle nascoste nella ricerca", "Configurazione")]
+        [Option(CliMeta.HiddenFlag, CliMeta.HiddenDesc, "Configurazione")]
         public bool IncludeHidden { get; set; } = false;
 
         [Option("ignore-case|i", "Rende case insensitive la ricerca", "Configurazione")]

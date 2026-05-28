@@ -24,7 +24,7 @@ namespace plugins.move
         [Option("ignore-case|i", "Rende la ricerca case-insensitive")]
         public bool IgnoreCase { get; set; }
 
-        [Option("hidden|H", "Includi file e cartelle nascoste nella ricerca")]
+        [Option(CliMeta.HiddenFlag, CliMeta.HiddenDesc)]
         public bool IncludeHidden { get; set; } = false;
 
         [Option("overwrite|ow", "Sovrascrive i file nella destinazione se esistono già")]
