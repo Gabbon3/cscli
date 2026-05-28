@@ -363,7 +363,7 @@ class FindPlugin : Plugin
                 item.AsNameSpan(),
                 item.IsDirectory,
                 item.Length,
-                item.LastWriteTime.Ticks
+                new DateTimeOffset(item.LastWriteTime).ToUnixTimeMilliseconds()
             );
 
             // Il Source Generator ha creato questi metodi autonomamente
