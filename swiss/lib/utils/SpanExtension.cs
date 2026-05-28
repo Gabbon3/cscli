@@ -103,6 +103,30 @@ namespace lib.utils.span
         }
 
         #endregion
+        #region bool
+
+        /// <summary>
+        /// AppendTo per i booleani.
+        /// Scrive sempre in minuscolo ("true" o "false") per garantire 
+        /// la piena conformità con lo standard JSON.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void AppendTo(this bool value, Span<char> destination, ref int currentIndex)
+        {
+            if (value)
+            {
+                // In C# "stringa" è convertibile implicitamente in ReadOnlySpan<char>
+                "true".CopyTo(destination[currentIndex..]);
+                currentIndex += 4; // lunghezza di "true"
+            }
+            else
+            {
+                "false".CopyTo(destination[currentIndex..]);
+                currentIndex += 5; // lunghezza di "false"
+            }
+        }
+
+        #endregion
         #region Fill
 
         /// <summary>

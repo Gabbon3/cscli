@@ -17,15 +17,13 @@
 
 		<PublishAot>true</PublishAot>
 		<OptimizationPreference>Speed</OptimizationPreference>
-		<!-- <PublishDir>c:\tesisquare\tools</PublishDir> -->
-		<PublishDir>c:\users\g2004\desktop\tools</PublishDir>
+		<PublishDir>c:\tesisquare\tools</PublishDir>
+		<!-- <PublishDir>c:\users\g2004\desktop\tools</PublishDir> -->
 
 		<StripSymbols>true</StripSymbols>
 		<ConsoleFullSymbolStackTraces>false</ConsoleFullSymbolStackTraces>
 		<StackTraceSupport>false</StackTraceSupport>
 		<InvariantGlobalization>true</InvariantGlobalization>
-
-		<OptimizationPreference>Size</OptimizationPreference>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -68,9 +66,17 @@
 	</ItemGroup>
 
 	<ItemGroup>
-        <ProjectReference Include="..\CliGenerators\CliGenerators.csproj" 
-                          OutputItemType="Analyzer" 
-                          ReferenceOutputAssembly="false" />
-    </ItemGroup>
+		<ProjectReference Include="..\SwissCliGenerators\SwissCliGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+
+		<CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Compile Remove="Generated\**" />
+	</ItemGroup>
 
 </Project>

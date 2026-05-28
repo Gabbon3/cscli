@@ -4,3 +4,6 @@ test/
 swiss/bin/
 swiss/obj/
 swiss/Properties/
+SwissCliGenerators/bin/
+SwissCliGenerators/obj/
+SwissCliGenerators/Properties/

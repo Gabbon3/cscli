@@ -30,8 +30,8 @@ namespace plugins.move
         [Option("overwrite|ow", "Sovrascrive i file nella destinazione se esistono già")]
         public bool Overwrite { get; set; }
 
-        [Option("silence|s", "Non mostrare la UI di progressione a video")]
-        public bool Silence { get; set; }
+        [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc)]
+        public bool Silence { get; set; } = false;
 
         // --- OPZIONI CON VALORE ---
 

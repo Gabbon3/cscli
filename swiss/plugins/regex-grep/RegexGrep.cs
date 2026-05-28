@@ -77,6 +77,7 @@ namespace plugins.regexgrep
         {
             public string Root = string.Empty;
             public string Pattern = string.Empty;
+            public OutputFormat Format = OutputFormat.Console;
             public HashSet<string> ExcludeDirs = new(StringComparer.OrdinalIgnoreCase);
             public Channel<GrepFileEntry> FilesChannel = Channel.CreateBounded<GrepFileEntry>(1);
         }
@@ -169,46 +170,29 @@ namespace plugins.regexgrep
                 return false;
             }
 
-            // configuro l'output in base alla formattazione desiderata
-            OutputFormat outputFormat = settings.Format switch
-            {
-                "csv" => OutputFormat.Csv,
-                "json" => OutputFormat.Json,
-                _ => OutputFormat.Console
-            };
-            GrepOutput.Configure(outputFormat);
-
-            // Setup output
-            bool outputIsFormatted = outputFormat == OutputFormat.Csv || outputFormat == OutputFormat.Json;
-
-            ConsoleOutput consoleOutput = outputIsFormatted ? ConsoleOutput.InstanceWrite : ConsoleOutput.InstanceWriteLine;
-            IFastOutput printerOutput = consoleOutput;
-
-            bool hasOutputFile = !string.IsNullOrWhiteSpace(settings.OutputFile);
-
-            if (hasOutputFile)
-            {
-                var fileOutput = new FileOutput(settings.OutputFile!);
-
-                if (settings.Silence)
-                {
-                    printerOutput = fileOutput;
-                }
-                else
-                {
-                    printerOutput = new CompositeOutput(consoleOutput, fileOutput);
-                }
-            }
-            else if (settings.Silence)
-            {
-                printerOutput = NullOutput.Instance;
-            }
+            // # Configuro FastPrinter
+            
+            State.Format = FastPrinter.GetOutputFormat(settings.Format);
+            
+            IFastOutput printerOutput = FastPrinter.GenerateFastOutput(State.Format, settings.Silence, settings.OutputFile);
 
             var fastPrinterOptions = new FastPrinter.FastPrinterOptions(
                 output: printerOutput,
                 capacity: 10_000);
 
             _fastPrinter = new FastPrinter(fastPrinterOptions);
+
+            // stampo l'header solo per il caso del CSV
+            if (State.Format == OutputFormat.Csv)
+            {
+                string header = CountOnly
+                    ? "Path;Count\n"
+                    : "Path;Line;Column;Length;PreMatch;Match;PostMatch\n";
+
+                _fastPrinter.TryPost(header);
+            }
+
+            // ---
 
             State.Root = root;
             MinMatchCount = settings.MinCount > 0 ? settings.MinCount : 1;
@@ -227,17 +211,6 @@ namespace plugins.regexgrep
                 StringComparisonType = StringComparison.OrdinalIgnoreCase;
             }
             FixedPattern = settings.FixedPattern;
-
-            // stampo l'header solo per il caso del CSV
-            if (outputFormat == OutputFormat.Csv)
-            {
-                // Usiamo lo stesso delimitatore (;) configurato nel formatter
-                string header = CountOnly
-                    ? "Path;Count\n"
-                    : "Path;Line;Column;Length;PreMatch;Match;PostMatch\n";
-
-                _fastPrinter.TryPost(header);
-            }
 
             return true;
         }
@@ -651,6 +624,9 @@ namespace plugins.regexgrep
             return count;
         }
 
+        #endregion
+        #region Process Match
+
         /// <summary>
         /// Wrap per il processo di un singolo match, in questo modo gestisco in maniera pulita i due cicli (con regex o meno)
         /// </summary>
@@ -707,23 +683,48 @@ namespace plugins.regexgrep
                 exactRight = span[endMatch..actualEnd];
             }
 
-            // costruisco la struct (se il match era gigante, left/match/right SARANNO VUOTI)
-            var matchData = new GrepMatchData(path, exactLeft, exactMatch, exactRight, lineNumber, column, matchLength);
-
-            int writtenChars = GrepOutput.FormatMatch(ref matchData, outputBuffer);
-
-            if (writtenChars > 0)
+            // 3. Stampa o Generazione Dati
+            if (State.Format == OutputFormat.Console)
             {
-                var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
-                outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
-                _fastPrinter!.Post(memoryOwner, writtenChars);
+                var matchData = new GrepMatchData(path, exactLeft, exactMatch, exactRight, lineNumber, column, matchLength);
+
+                // Chiamata statica diretta
+                int writtenChars = GrepOutputFormatter.FormatMatchConsole(ref matchData, outputBuffer);
+
+                if (writtenChars > 0)
+                {
+                    var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
+                    outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
+                    _fastPrinter!.Post(memoryOwner, writtenChars);
+                }
+            }
+            else
+            {
+                int pos = 0;
+
+                int leftStart = pos; exactLeft.CopyTo(outputBuffer.AsSpan(pos)); pos += exactLeft.Length;
+                var safeLeft = outputBuffer.AsSpan(leftStart, exactLeft.Length);
+                TextSanitizer.SanitizeForDataFormat(safeLeft);
+
+                int matchStart = pos; exactMatch.CopyTo(outputBuffer.AsSpan(pos)); pos += exactMatch.Length;
+                var safeMatch = outputBuffer.AsSpan(matchStart, exactMatch.Length);
+                TextSanitizer.SanitizeForDataFormat(safeMatch);
+
+                int rightStart = pos; exactRight.CopyTo(outputBuffer.AsSpan(pos)); pos += exactRight.Length;
+                var safeRight = outputBuffer.AsSpan(rightStart, exactRight.Length);
+                TextSanitizer.SanitizeForDataFormat(safeRight);
+
+                var matchData = new GrepMatchData(path, safeLeft, safeMatch, safeRight, lineNumber, column, matchLength);
+
+                var (owner, length) = State.Format == OutputFormat.Json ? matchData.ToJson() : matchData.ToCsv();
+                _fastPrinter!.Post(owner, length);
             }
 
             return true;
         }
 
         #endregion
-        #region Count Result
+        #region Process Count
 
         /// <summary>
         /// Stampa il conteggio match per file (modalità count-only).
@@ -732,13 +733,26 @@ namespace plugins.regexgrep
         private void PrintCountResult(string path, long fileMatchCount, char[] outputBuffer)
         {
             var countData = new GrepCountData(path, fileMatchCount);
-            int writtenChars = GrepOutput.FormatCount(ref countData, outputBuffer);
 
-            if (writtenChars > 0)
+            if (State.Format == OutputFormat.Console)
             {
-                var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
-                outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
-                _fastPrinter!.Post(memoryOwner, writtenChars);
+                // Chiamata statica diretta
+                int writtenChars = GrepOutputFormatter.FormatCountConsole(ref countData, outputBuffer);
+
+                if (writtenChars > 0)
+                {
+                    var memoryOwner = MemoryPool<char>.Shared.Rent(writtenChars);
+                    outputBuffer.AsSpan(0, writtenChars).CopyTo(memoryOwner.Memory.Span);
+                    _fastPrinter!.Post(memoryOwner, writtenChars);
+                }
+            }
+            else
+            {
+                var (owner, length) = State.Format == OutputFormat.Json
+                    ? countData.ToJson()
+                    : countData.ToCsv();
+
+                _fastPrinter!.Post(owner, length);
             }
         }
 

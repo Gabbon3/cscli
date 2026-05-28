@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SwissCliGenerators")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+82b186bae3db9c6b1cd81b093dfffc7927945dd7")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+12f6ef1efa5ea6587adb02fab5dfddf1c94e72be")]
 [assembly: System.Reflection.AssemblyProductAttribute("SwissCliGenerators")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SwissCliGenerators")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

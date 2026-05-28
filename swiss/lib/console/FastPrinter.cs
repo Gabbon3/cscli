@@ -4,6 +4,12 @@ using System.Threading.Channels;
 
 namespace lib.console.fastprinter;
 
+#region Output Format
+
+public enum OutputFormat { Console, Csv, Json }
+
+#endregion
+
 #region Interface
 /// <summary>
 /// Interfaccia per qualsiasi destinazione di output supportata da FastPrinter.
@@ -40,15 +46,15 @@ public sealed class NullOutput : IFastOutput
 
     // Ritorna ValueTask.CompletedTask che struct-based, zero allocazioni in heap
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask WriteAsync(ReadOnlyMemory<char> memory, CancellationToken ct = default) 
+    public ValueTask WriteAsync(ReadOnlyMemory<char> memory, CancellationToken ct = default)
         => ValueTask.CompletedTask;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask FlushAsync(CancellationToken ct = default) 
+    public ValueTask FlushAsync(CancellationToken ct = default)
         => ValueTask.CompletedTask;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ValueTask DisposeAsync() 
+    public ValueTask DisposeAsync()
         => ValueTask.CompletedTask;
 }
 #endregion
@@ -62,7 +68,7 @@ public sealed class ConsoleOutput : IFastOutput
 
     // # Singleton per WriteLine (con ritorno a capo)
     public static readonly ConsoleOutput InstanceWriteLine = new(true);
-    
+
     // # Singleton per Write (senza ritorno a capo)
     public static readonly ConsoleOutput InstanceWrite = new(false);
 
@@ -187,6 +193,59 @@ public sealed class CompositeOutput : IFastOutput
 /// </summary>
 public class FastPrinter
 {
+    /// <summary>
+    /// Restituisce l'enum corrispettivo in base al formato richiesto:
+    /// - console (default)
+    /// - csv
+    /// - json
+    /// </summary>
+    /// <param name="format"></param>
+    /// <returns></returns>
+    public static OutputFormat GetOutputFormat(string? format)
+    {
+        return format switch
+        {
+            "csv" => OutputFormat.Csv,
+            "json" => OutputFormat.Json,
+            _ => OutputFormat.Console
+        };
+    }
+
+    /// <summary>
+    /// Restituisce l'oggetto che definisce al FastPrinter come e dove stampare
+    /// </summary>
+    /// <param name="format">enum del formato di output</param>
+    /// <param name="silence">se true non verrà considerata la stampa a console</param>
+    /// <param name="outputFilePath">percorso del file di output</param>
+    /// <returns></returns>
+    public static IFastOutput GenerateFastOutput(OutputFormat format, bool silence, string? outputFilePath)
+    {
+        bool outputIsFormatted = format != OutputFormat.Console;
+        bool hasOutputFile = !string.IsNullOrWhiteSpace(outputFilePath);
+
+        ConsoleOutput consoleOutput = outputIsFormatted ? ConsoleOutput.InstanceWrite : ConsoleOutput.InstanceWriteLine;
+        IFastOutput printerOutput = consoleOutput;
+        
+        if (hasOutputFile)
+        {
+            var fileOutput = new FileOutput(outputFilePath!);
+
+            if (silence)
+            {
+                printerOutput = fileOutput;
+            }
+            else
+            {
+                printerOutput = new CompositeOutput(consoleOutput, fileOutput);
+            }
+        }
+        else if (silence)
+        {
+            printerOutput = NullOutput.Instance;
+        }
+
+        return printerOutput;
+    }
     private readonly struct PrintPayload : IDisposable
     {
         private readonly string? _text;

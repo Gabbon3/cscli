@@ -17,8 +17,8 @@ namespace plugins.eliminator
         [Option("drop-source|ds", "Cancella al termine anche la cartella target", "Comando")]
         public bool DropSource { get; set; } = false;
 
-        [Option("silence|s", "Non mostrare la UI di progressione a video", "Comando")]
-        public bool Silence { get; set; }
+        [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc, "Comando")]
+        public bool Silence { get; set; } = false;
 
         [Option("ignore-errors|ie", "Se attivo ignora gli errori di cancellazione dei file", "Comando")]
         public bool IgnoreErrors { get; set; } = false;

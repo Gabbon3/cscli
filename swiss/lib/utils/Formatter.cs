@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using lib.utils.span;
+
 namespace lib.utils
 {
     class Formatter
@@ -55,6 +58,23 @@ namespace lib.utils
                 return $"{ts.Minutes}m {ts.Seconds}s"; // Es: 1m 20s
 
             return $"{(int)ts.TotalHours}h {ts.Minutes}m {ts.Seconds}s"; // Es: 1h 5m 20s
+        }
+
+        /// <summary>
+        /// Formatta il path di un file con il classico pattern
+        /// [grigio]percorso[ciano]file
+        /// </summary>
+        /// <param name="path">percorso da formattare</param>
+        /// <param name="output">buffer su cui scrivere il path colorato</param>
+        /// <param name="pos"></param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void FormatFilePath(ReadOnlySpan<char> path, Span<char> output, ref int pos)
+        {
+            "[DarkGray]".AsSpan().AppendTo(output, ref pos);
+            Path.GetDirectoryName(path).AppendTo(output, ref pos);
+            Path.DirectorySeparatorChar.AppendTo(output, ref pos);
+            "[Cyan]".AsSpan().AppendTo(output, ref pos);
+            Path.GetFileName(path).AppendTo(output, ref pos);
         }
     }
 }

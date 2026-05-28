@@ -1,4 +1,6 @@
 namespace lib.generator;
 
 [AttributeUsage(AttributeTargets.Struct)]
-public class GenerateFormattedOutputAttribute : Attribute { }
+public class FastSerializable : Attribute
+{
+}

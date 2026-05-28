@@ -13,7 +13,7 @@ namespace plugins.regexgrep
 
         // configurazione
 
-        [Option("silence|s", "Se attivo non mostra i risultati a console", "Configurazione")]
+        [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc, "Configurazione")]
         public bool Silence { get; set; } = false;
 
         [Option("ignore-case|i", "Regex case insensitive", "Configurazione")]
@@ -53,10 +53,10 @@ namespace plugins.regexgrep
 
         // output
 
-        [Option("output-file|o", "Indica il percorso del file dove scrivere i risultati del grep", "Output")]
-        public string? OutputFile { get; set; }
-
-        [Option("format|F", "Formato di output: console (default), csv, json", "Output")]
+        [Option(CliMeta.FormatFlag, CliMeta.FormatDesc, "Output")]
         public string? Format { get; set; }
+
+        [Option(CliMeta.OutputFileFlag, CliMeta.OutputFileDesc, "Output")]
+        public string? OutputFile { get; set; }
     }
 }

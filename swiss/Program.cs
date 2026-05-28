@@ -19,8 +19,8 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.0.4";
-const string versionDescription = "Grep - supporto per ricerche fixed";
+const string version = "2.0.5";
+const string versionDescription = "Source Generators per output strutturato";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -188,6 +188,6 @@ static void PrintStatistics(TimeSpan elapsed, TimeSpan cpuTime, long peakMemoryB
     , 0, '*', 2);
     ConsolePlus.WriteHr(40);
 }
-// # -------------------------- #
-// dotnet build /t:PublishRelease
-// # -------------------------- #
+// # --------------------------------------------------- #
+// dotnet publish swiss/swiss.csproj -c Release -r win-x64
+// # --------------------------------------------------- #

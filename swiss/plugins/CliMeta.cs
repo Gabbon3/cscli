@@ -15,4 +15,12 @@ public static class CliMeta
     // --- FLAG E DESCRIZIONI: CONFIGURAZIONE ---
     public const string ThreadsFlag = "threads|t";
     public const string ThreadsDesc = "Numero di thread da usare durante l'esecuzione (default: numero di core)";
+    public const string SilenceFlag = "silence|s";
+    public const string SilenceDesc = "Se attivo non mostra risultati di progessione a console";
+
+    // --- FLAG E DESCRIZIONI: OUTPUT --- 
+    public const string FormatFlag = "format|F";
+    public const string FormatDesc = "Formato di output: console (default), csv, json";
+    public const string OutputFileFlag = "output-file|o";
+    public const string OutputFileDesc = "Indica il percorso del file dove scrivere i risultati";
 }
