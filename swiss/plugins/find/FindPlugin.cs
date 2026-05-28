@@ -104,8 +104,8 @@ class FindPlugin : Plugin
         // 7. stampo la top n (se richiesta)
         if (State.IsRanking) PrintRankingResults();
         // 8. statistiche finali
-        PrintFinalSummary();
         await State.Printer.Complete();
+        PrintFinalSummary();
     }
 
     // # ---------------------------------- #
