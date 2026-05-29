@@ -89,7 +89,7 @@ namespace plugins.mdconverter
                     BufferSize = 4 * 1024,
                 });
             await writer.WriteLineAsync($"<!DOCTYPE html>\n<html lang=\"it\" {(darkMode ? "class=\"dark\"" : "")}>\n<head>\n<meta charset=\"utf-8\">");
-            // PrismJs per colorare il codice
+            // - PrismJs per colorare il codice
             await writer.WriteLineAsync("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js\"></script>");
             // - Autoloader per multilinguaggio
             await writer.WriteLineAsync("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js\"></script>");
@@ -106,7 +106,7 @@ namespace plugins.mdconverter
                 await writer.WriteLineAsync("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-one-light.min.css\" />");
             }
             // Font di google
-            await writer.WriteLineAsync("<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\r\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\r\n<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap\" rel=\"stylesheet\">");
+            await writer.WriteLineAsync("<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\r\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\r\n<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Lexend:wght@100..900&display=swap\" rel=\"stylesheet\">");
             // KateX
             await writer.WriteLineAsync("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.16.45/dist/katex.min.css\" crossorigin=\"anonymous\">");
             await writer.WriteLineAsync("<script defer src=\"https://cdn.jsdelivr.net/npm/katex@0.16.45/dist/katex.min.js\" crossorigin=\"anonymous\"></script>");
