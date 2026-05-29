@@ -51,6 +51,16 @@ namespace plugins.mdconverter
             bool convertToPdf = settings.Pdf;
             bool keepHtml = settings.KeepHtml;
             bool darkMode = settings.DarkMode;
+            // memorizza il percorso originale del file md
+            string originalMdPath = new(mdPath.AsSpan());
+            // # ----------------------------------- #
+            // # Creazione dell'indice del documento #
+            // # ----------------------------------- #
+            if (settings.CreateIndex)
+            {
+                mdPath = CreateIndex(mdPath);
+            }
+
             // chiave valore
             string? destPath = settings.DestPath;
             if (!string.IsNullOrEmpty(destPath))
@@ -72,11 +82,11 @@ namespace plugins.mdconverter
             string htmlFilePath;
             if (!string.IsNullOrEmpty(destPath))
             {
-                htmlFilePath = Path.Combine(destPath, Path.GetFileNameWithoutExtension(mdPath));
+                htmlFilePath = Path.Combine(destPath, Path.GetFileNameWithoutExtension(originalMdPath));
             }
             else
             {
-                htmlFilePath = Path.Combine(Path.GetDirectoryName(mdPath) ?? "", Path.GetFileNameWithoutExtension(mdPath));
+                htmlFilePath = Path.Combine(Path.GetDirectoryName(originalMdPath) ?? "", Path.GetFileNameWithoutExtension(originalMdPath));
             }
             htmlFilePath += ".html";
             await using var writer = new StreamWriter(
@@ -360,6 +370,18 @@ namespace plugins.mdconverter
             // # --------------------- #
             if (convertToPdf) await ConvertToPdf(htmlFilePath, keepHtml, ct);
             else ConsolePlus.Write($"[Cyan]#[Green] HTML generato: [Yellow]{htmlFilePath}[/]");
+
+            // # ----------------- #
+            // # 4. Pulizia finale #
+            // # ----------------- #
+            // se l'utente ha richiesto la creazione dell'indice
+            // ed è stato usato il file temporaneo allora lo cancello alla fine
+            if (settings.CreateIndex && originalMdPath != mdPath)
+            {
+                // qui mdpath fa riferimento al path temporaneo, quindi va rimosso
+                // in questo modo mantengo intatto il file originale che invece rimane clean
+                File.Delete(mdPath);
+            }
         }
 
         private void CountIndent(string line)
@@ -541,6 +563,112 @@ namespace plugins.mdconverter
             }
             return true;
         }
+
+        #region Create Index
+        /// <summary>
+        /// Genera e aggiunge il codice MarkDown per supportare l'indice
+        /// utilizza quindi il file temporaneo per la conversione
+        /// </summary>
+        /// <param name="mdPath"></param>
+        /// <returns>il file temporaneo generato</returns>
+        private string CreateIndex(string mdPath)
+        {
+            string tempPath = mdPath + ".tmp";
+            var headings = new List<(int Level, string Title, string Guid)>();
+            bool inCodeBlock = false;
+
+            // # 1. Lettura, estrazione titoli e scrittura del file temporaneo con le ancore
+            using (var reader = new StreamReader(mdPath))
+            using (var writer = new StreamWriter(tempPath, false, Encoding.UTF8))
+            {
+                string? line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    // stato per controllare se siamo in un blocco di codice
+                    if (line.TrimStart().StartsWith("```"))
+                    {
+                        inCodeBlock = !inCodeBlock;
+                    }
+
+                    // se è un titolo e non è contenuto in un blocco di codice procedo
+                    if (!inCodeBlock && line.StartsWith('#'))
+                    {
+                        int level = line.Length - line.TrimStart('#').Length;
+
+                        // controllo che sia effettivamente un titolo md controllando se presente lo spazio vuoto
+                        if (level > 0 && line.Length > level && line[level] == ' ')
+                        {
+                            // recupero solo il titolo effettivo
+                            string title = line[level..].Trim().TrimEnd('#').Trim();
+
+                            // genero il guid inserento h- perche i link in html non devono iniziare con i numeri
+                            string guid = "h-" + Guid.NewGuid().ToString("N");
+
+                            headings.Add((level, title, guid));
+
+                            // inserisco il tag a prima del titolo
+                            writer.WriteLine($"<a id=\"{guid}\"></a>");
+                        }
+                    }
+
+                    // scrittura della riga iniziale
+                    writer.WriteLine(line);
+                }
+            }
+
+            // se non ci sono titoli nel documento cancello il temporaneo ed esco
+            if (headings.Count == 0)
+            {
+                File.Delete(tempPath);
+                return mdPath;
+            }
+
+            // # 2. Costruzione del codice Markdown dell'Indice
+            int minLevel = headings.Min(h => h.Level); // normalizzo l'indentazione recuperando il livello minimo ottenuto
+            StringBuilder indexBuilder = new StringBuilder();
+
+            indexBuilder.AppendLine("# Indice");
+            indexBuilder.AppendLine();
+
+            foreach (var h in headings)
+            {
+                int indentTabs = h.Level - minLevel;
+                string indent = new string('\t', indentTabs);
+
+                // genero il li con il link locale
+                indexBuilder.AppendLine($"{indent}* [{h.Title}](#{h.Guid})");
+            }
+
+            indexBuilder.AppendLine();
+            indexBuilder.AppendLine("---");
+            indexBuilder.AppendLine();
+
+            // # 3. Assemblaggio Finale
+            string finalTempPath = tempPath + ".final"; // creo un secondo file temp
+
+            using (var finalWriter = new StreamWriter(finalTempPath, false, Encoding.UTF8))
+            {
+                // A) scrivo l'indice in cima
+                finalWriter.Write(indexBuilder.ToString());
+
+                // B) ricopio il contenuto modificato (con le ancore) dal PRIMO file temporaneo
+                using var tempReader = new StreamReader(tempPath);
+                string? tempLine;
+                while ((tempLine = tempReader.ReadLine()) != null)
+                {
+                    finalWriter.WriteLine(tempLine);
+                }
+            }
+
+            // cancello il file di temp che non serve piu
+            File.Delete(tempPath);
+
+            ConsolePlus.Write("[Cyan]#[Green] Indice generato e inserito con successo nel file temporaneo.[/]");
+
+            // restituisco il percorso del file finale modificato
+            return finalTempPath;
+        }
+        #endregion
 
         private string GetEmbeddedCss()
         {

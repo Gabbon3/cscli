@@ -16,6 +16,9 @@ namespace plugins.mdconverter
         [Option("dark|d", "Genera il documento in dark mode")]
         public bool DarkMode { get; set; }
 
+        [Option("generate-index|I", "Aggiunge in cima al documento una lista con i collegamenti a tutti i titoli suddivisi per livello")]
+        public bool CreateIndex { get; set; }
+
         // --- OPZIONI CON VALORE ---
         [Option("destpath|dp", "Path di destinazione del file generato")]
         public string? DestPath { get; set; }
