@@ -300,7 +300,7 @@ namespace plugins.regexgrep
         {
             var enumerationOptions = new EnumerationOptions
             {
-                RecurseSubdirectories = true,
+                RecurseSubdirectories = settings.RecurseSubdirectories,
                 IgnoreInaccessible = true,
                 ReturnSpecialDirectories = false
             };

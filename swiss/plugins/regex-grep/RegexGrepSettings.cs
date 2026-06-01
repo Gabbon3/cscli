@@ -19,6 +19,9 @@ namespace plugins.regexgrep
         [Option("ignore-case|i", "Regex case insensitive", "Configurazione")]
         public bool IgnoreCase { get; set; }
 
+        [Option("recurse|r", "Se attivo ricerca anche nelle sottocartelle", "Configurazione")]
+        public bool RecurseSubdirectories { get; set; } = false;
+
         [Option("fixed|f", "Disabilita la regex, cerca direttamente la stringa", "Configurazione")]
         public bool FixedPattern { get; set; }
 
