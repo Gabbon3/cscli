@@ -44,7 +44,7 @@ namespace plugins.count
                 ModifiedAfter: settings.Since
             );
 
-            FileSystemFilter? fileFilter = null;
+            FileSystemFilter? fileFilter;
             try
             {
                 fileFilter = FileFilterFactory.CreateFilter(filterOpts);
@@ -56,8 +56,8 @@ namespace plugins.count
             }
 
             // configurazione walker
-            FileAttributes attributesToSkip = FileAttributes.System;
-            if (!settings.IncludeHidden) attributesToSkip |= FileAttributes.Hidden;
+            FileAttributes attributesToSkip = FileAttributes.None;
+            if (!settings.IncludeHidden) attributesToSkip = FileAttributes.Hidden;
 
             var fastWalkerOptions = new FastWalkerOptions
             {
