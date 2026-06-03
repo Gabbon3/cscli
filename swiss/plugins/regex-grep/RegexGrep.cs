@@ -102,8 +102,8 @@ namespace plugins.regexgrep
             State = new RegexGrepState();
             // 2. valido i configuro stati e attributi della classe
             if (!ParseAndValidateSettings(settings)) return;
-            // 3. valido e compilo la regex
-            ValidateAndCompileRegex(settings.Pattern);
+            // 3. valido e verifico la regex (solo se uso effettivamente la regex)
+            if (!settings.FixedPattern) ValidateAndTestRegex(settings.Pattern);
             // 4. configuro i filtri delle directory
             ConfigureDirectoryFilters(settings);
             // 5. inizializzo il motore regex e il channel
@@ -218,7 +218,7 @@ namespace plugins.regexgrep
         #endregion
         #region Pattern & Regex
 
-        private void ValidateAndCompileRegex(string pattern)
+        private void ValidateAndTestRegex(string pattern)
         {
             State.Pattern = pattern;
 
