@@ -73,7 +73,8 @@ namespace plugins.tree
             var options = new FastWalkerOptions
             {
                 RecurseSubdirectories = true,
-                IgnoreInaccessible = true
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.None, // leggo tutto quanto
             };
 
             var channel = FastWalker.Walk<StackFileInfo>(
