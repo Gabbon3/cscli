@@ -21,6 +21,8 @@ namespace plugins.regexgrep
 
         [Option("recurse|r", "Se attivo ricerca anche nelle sottocartelle", "Configurazione")]
         public bool RecurseSubdirectories { get; set; } = false;
+        [Option(CliMeta.HiddenFlag, CliMeta.HiddenDesc, "Configurazione")]
+        public bool IncludeHidden { get; set; } = false;
 
         [Option("fixed|f", "Disabilita la regex, cerca direttamente la stringa", "Configurazione")]
         public bool FixedPattern { get; set; }

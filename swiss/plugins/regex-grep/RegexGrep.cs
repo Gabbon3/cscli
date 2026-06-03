@@ -298,11 +298,17 @@ namespace plugins.regexgrep
 
         private async Task RunProducerAsync(RegexGrepSettings settings, CancellationToken ct)
         {
+            // costruisco gli attributi dei file da skippare
+            FileAttributes attributesToSkip = FileAttributes.System;
+            // se NON devo controllare nei file nascosti, lo aggiungo alle caratteristiche
+            if (!settings.IncludeHidden) attributesToSkip |= FileAttributes.Hidden;
+
             var enumerationOptions = new EnumerationOptions
             {
                 RecurseSubdirectories = settings.RecurseSubdirectories,
                 IgnoreInaccessible = true,
-                ReturnSpecialDirectories = false
+                ReturnSpecialDirectories = false,
+                AttributesToSkip = attributesToSkip
             };
 
             // # FILE FILTER
