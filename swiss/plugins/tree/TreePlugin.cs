@@ -228,7 +228,7 @@ namespace plugins.tree
             Console.Write(isLast ? "'-- " : "|-- ");
 
             // 2. Nome della cartella in evidenza
-            ConsolePlus.Write($"[DarkGreen]{node.Name}[/] ", false);
+            ConsolePlus.Write($"[Green]{node.Name}[/] ", false);
 
             // 3. Formattazione pulita: Dimensione in risalto, file/dirs in secondo piano
             string size = Formatter.Bytes(node.SizeBytes);
