@@ -127,8 +127,10 @@ namespace lib.io
                                 {
                                     ct.ThrowIfCancellationRequested();
                                     // scriviamo tutti i file nel channel output
+                                    // FAST PATH: provo a scrivere in maniera sincrona il file
                                     if (!outputChannel.Writer.TryWrite(enumerator.Current))
                                     {
+                                        // SLOW PATH: devo attendere poiche il channel è pieno
                                         await outputChannel.Writer.WriteAsync(enumerator.Current);
                                     }
                                 }
