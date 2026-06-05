@@ -130,7 +130,7 @@ namespace plugins.mdconverter
         startOnLoad: true,
         theme: '{mermaidTheme}',
         securityLevel: 'loose',
-        themeVariables: {{ fontFamily: 'Roboto, sans-serif' }}
+        themeVariables: {{ fontFamily: 'Lexend, sans-serif' }}
     }});
 </script>");
             // CSS e apertura body
