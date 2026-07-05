@@ -50,6 +50,9 @@ class MovePlugin : Plugin
 
         public long LastProgressTickMs { get; set; }
         public bool ProgressPrinted { get; set; }
+        public long LastRateTickMs { get; set; }
+        public long LastRateFilesCount { get; set; }
+        public double CurrentFilesPerSecond { get; set; }
 
         public int SourceRootLength { get; set; }
     }
@@ -77,6 +80,11 @@ class MovePlugin : Plugin
         Errors.Clear();
 
         if (!ParseAndValidateSettings(settings)) return;
+
+        long nowMs = Environment.TickCount64;
+        State.LastProgressTickMs = nowMs;
+        State.LastRateTickMs = nowMs;
+        State.LastRateFilesCount = 0;
 
         ConsolePlus.Write($"[Cyan]#[/] Avvio spostamento verso [Yellow]{State.DestinationPath}[/] ... {(State.IsDebug ? "(DEBUG)" : "")}");
 
@@ -369,10 +377,19 @@ class MovePlugin : Plugin
         long nowMs = Environment.TickCount64;
         if (nowMs - State.LastProgressTickMs < 250) return;
 
+        long deltaMs = nowMs - State.LastRateTickMs;
+        if (deltaMs > 0)
+        {
+            long movedDelta = State.MovedFilesCount - State.LastRateFilesCount;
+            State.CurrentFilesPerSecond = movedDelta / (deltaMs / 1000d);
+            State.LastRateFilesCount = State.MovedFilesCount;
+            State.LastRateTickMs = nowMs;
+        }
+
         State.LastProgressTickMs = nowMs;
         State.ProgressPrinted = true;
 
-        Console.Write($"\rFile spostati: {State.MovedFilesCount:N0} | Dati: {Formatter.Bytes(State.BytesMoved)}     ");
+        Console.Write($"\rFile spostati: {State.MovedFilesCount:N0} | Velocita: {State.CurrentFilesPerSecond:N1} file/s | Dati: {Formatter.Bytes(State.BytesMoved)}     ");
     }
 
     #endregion
