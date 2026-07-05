@@ -108,14 +108,21 @@ class MovePlugin : Plugin
         string? destPath = ParsePath(settings.DestinationPath, checkPath: false);
         if (string.IsNullOrEmpty(destPath)) return false;
 
-        if (destPath.StartsWith(sourcePath, StringComparison.OrdinalIgnoreCase))
+        string normalizedSourcePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourcePath));
+        string normalizedDestPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destPath));
+
+        bool samePath = normalizedDestPath.Equals(normalizedSourcePath, StringComparison.OrdinalIgnoreCase);
+        bool isSubDirectory = normalizedDestPath.StartsWith(normalizedSourcePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || normalizedDestPath.StartsWith(normalizedSourcePath + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+        if (samePath || isSubDirectory)
         {
             PrintError("La destinazione non può essere una sottocartella della cartella di origine.");
             return false;
         }
 
-        State.SourcePath = sourcePath;
-        State.DestinationPath = destPath;
+        State.SourcePath = normalizedSourcePath;
+        State.DestinationPath = normalizedDestPath;
         State.IsDebug = settings.Debug;
         State.IsRecursive = settings.Recursive;
         State.Overwrite = settings.Overwrite;
