@@ -10,41 +10,41 @@ namespace plugins.move
         [Fixed(1, "destinazione", "Il percorso di destinazione dove spostare i file (usa '.' per la cartella corrente)")]
         public string DestinationPath { get; set; } = string.Empty;
 
-        // --- OPZIONI BOOLEANE (Flag) ---
+        // --- opzioni del comando ---
 
-        [Option("debug|d", "Simula l'operazione senza toccare i file sul disco (Dry-run)")]
+        [Option("debug|d", "Simula l'operazione senza toccare i file sul disco (Dry-run)", "Comando")]
         public bool Debug { get; set; }
 
-        [Option("recursive|r", "Scansiona anche le sottocartelle e ricrea l'albero nella destinazione")]
+        [Option("recursive|r", "Scansiona anche le sottocartelle e ricrea l'albero nella destinazione", "Comando")]
         public bool Recursive { get; set; }
 
-        [Option("fixed|f", "Usa il pattern come stringa esatta invece che come espressione regolare")]
-        public bool FixedMatch { get; set; }
-
-        [Option("ignore-case|i", "Rende la ricerca case-insensitive")]
-        public bool IgnoreCase { get; set; }
-
-        [Option(CliMeta.HiddenFlag, CliMeta.HiddenDesc)]
-        public bool IncludeHidden { get; set; } = false;
-
-        [Option("overwrite|ow", "Sovrascrive i file nella destinazione se esistono già")]
+        [Option("overwrite|ow", "Sovrascrive i file nella destinazione se esistono", "Comando")]
         public bool Overwrite { get; set; }
 
-        [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc)]
+        [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc, "Comando")]
         public bool Silence { get; set; } = false;
 
-        // --- OPZIONI CON VALORE ---
+        [Option("ignore-errors|ie", "Se attivo ignora gli errori di spostamento dei file", "Comando")]
+        public bool IgnoreErrors { get; set; } = false;
 
-        [Option("pattern|p", "Filtra i file in base a un'espressione regolare sul nome")]
+        // --- opzioni di filtraggio ---
+
+        [Option("fixed|f", "Usa il pattern come stringa esatta invece che come espressione regolare", "Filtri")]
+        public bool FixedMatch { get; set; }
+
+        [Option("ignore-case|i", "Rende la ricerca case-insensitive", "Filtri")]
+        public bool IgnoreCase { get; set; }
+
+        [Option(CliMeta.HiddenFlag, CliMeta.HiddenDesc, "Filtri")]
+        public bool IncludeHidden { get; set; } = false;
+
+        [Option("pattern|p", "Filtra i file in base a un'espressione regolare sul nome", "Filtri")]
         public string? Pattern { get; set; }
 
-        [Option("threads|t", "Specifica il numero massimo di thread (default: numero di core della CPU)")]
-        public int? Threads { get; set; }
-
-        [Option("newer-than|n", "Colpisce solo i file modificati da questa data in poi")]
+        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
         public DateTime? Since { get; set; } 
 
-        [Option("older-than|o", "Colpisce solo i file più vecchi di questa data/età")]
+        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
         public DateTime? OlderThan { get; set; }
     }
 }

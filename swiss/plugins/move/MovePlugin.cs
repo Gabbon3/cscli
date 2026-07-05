@@ -1,577 +1,409 @@
-﻿using System.IO.Enumeration;
-using System.Threading.Channels;
+using System.Buffers;
+using System.Diagnostics;
+using System.IO.Enumeration;
+using lib.console;
 using lib.io;
+using lib.io.stack;
 using lib.utils;
 using lib.utils.span;
-using lib.console;
-using lib.io.stack;
-using Spectre.Console;
-using System.Buffers;
-using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
-using System.Diagnostics;
 
-namespace plugins.move
+namespace plugins.move;
+
+class MovePlugin : Plugin
 {
-    class MovePlugin : Plugin
+    #region metadata
+
+    public override string Name => "move";
+    public override string Description => "Tool per lo spostamento massivo di file e cartelle";
+
+    private MoveState State = new();
+    private readonly List<MoveException> Errors = [];
+
+    #endregion
+
+    #region state
+
+    private struct MoveException(string section, Exception ex)
     {
-        public override string Name => "move";
-        public override string Description => "Tool multithreaded per lo spostamento di file e cartelle";
+        public string Section { get; set; } = section;
+        public string Message { get; set; } = $"{ex.Message} in {ex.Source}";
+    }
 
-        // dimensione padding per prevenire false-sharing su MovedFilesCountList
-        private const int CounterStride = 8;
-        private const int FlushMask = 127;
-        private MoveState State = new();
-        private Diagnostics Stats = new();
-        private ConcurrentBag<MoveException> _errorsBag = [];
+    private class MoveState
+    {
+        public string SourcePath { get; set; } = string.Empty;
+        public string DestinationPath { get; set; } = string.Empty;
 
-        private struct MoveException(string section, Exception ex)
+        public bool IsDebug { get; set; }
+        public bool IsRecursive { get; set; }
+        public bool Overwrite { get; set; }
+        public bool IgnoreErrors { get; set; }
+        public bool IsSilent { get; set; }
+
+        public FileAttributes AttributesToSkip { get; set; }
+        public FileSystemFilter? FileFilter { get; set; }
+
+        public long MovedFilesCount { get; set; }
+        public long BytesMoved { get; set; }
+        public int DirectoryCreated { get; set; }
+        public double DirectoryCreationMs { get; set; }
+
+        public long LastProgressTickMs { get; set; }
+        public bool ProgressPrinted { get; set; }
+
+        public int SourceRootLength { get; set; }
+    }
+
+    #endregion
+
+    #region run
+
+    /// <summary>
+    /// avvio il comando: leggo gli argomenti, preparo lo stato, eseguo lo spostamento e stampo il riepilogo finale.
+    /// </summary>
+    /// <param name="args">ricevo gli argomenti cli passati dall'utente.</param>
+    /// <param name="ct">uso il token per annullare l'operazione in modo cooperativo.</param>
+    public override async Task RunAsync(string[] args, CancellationToken ct)
+    {
+        var settings = ParseSettings<MoveSettings>(args);
+
+        if (args.Contains("--help") || string.IsNullOrEmpty(settings.SourcePath) || string.IsNullOrEmpty(settings.DestinationPath))
         {
-            public string Section { get; set; } = section;
-            public string Message { get; set; } = $"{ex.Message} in {ex.Source}";
-        }
-        #region state
-        // # Stato interno
-        /// <summary>
-        /// Contiene lo stato completo dell'operazione di spostamento.
-        /// Include configurazioni, canali di comunicazione e contatori di progresso.
-        /// </summary>
-        private class MoveState
-        {
-            public string SourcePath { get; set; } = "";
-            public string DestinationPath { get; set; } = "";
-
-            public bool IsDebug { get; set; }
-            public bool IsRecursive { get; set; }
-            public bool Overwrite { get; set; }
-            public FileAttributes AttributesToSkip { get; set; }
-            public int ConsumerCount { get; set; }
-            public FileSystemFilter? FileFilter { get; set; }
-
-            // Canali di comunicazione
-            public Channel<string>? DirectoryChannel { get; set; }
-            public Channel<StackFileInfo>? FileChannel { get; set; }
-
-            public long[] MovedFilesCountList { get; set; } = [];
-            public long[] BytesMovedList { get; set; } = [];
-            public bool IsProcessing { get; set; } = true;
-
-            // WaitGroup per il producer: tiene traccia delle cartelle in sospeso
-            public int ActiveDirCount;
-            public int DirectoryCreated;
-        }
-        #endregion
-
-        /// <summary>
-        /// Classe per tracciare alcune statistiche
-        /// </summary>
-        private class Diagnostics
-        {
-            public double TempoCreazioneCartelle { get; set; } = 0;
-        }
-        #region RunAsync
-        // # Esecuzione Principale
-        public override async Task RunAsync(string[] args, CancellationToken ct)
-        {
-            var settings = ParseSettings<MoveSettings>(args);
-
-            // Controlliamo che entrambi gli argomenti fixed siano stati forniti
-            if (args.Contains("--help") || string.IsNullOrEmpty(settings.SourcePath) || string.IsNullOrEmpty(settings.DestinationPath))
-            {
-                Help();
-                return;
-            }
-
-            State = new MoveState();
-            Stats = new Diagnostics();
-
-            // 1. parsing e validazione delle settings
-            if (!ParseAndValidateSettings(settings))
-            {
-                return;
-            }
-
-            ConsolePlus.Write($"[Cyan]#[/] Avvio spostamento verso [Yellow]{State.DestinationPath}[/] ... {(State.IsDebug ? "(DEBUG)" : "")}");
-
-            // 2. inizializzo i canali di comunicazione
-            InitializeChannels();
-
-            // 3. inizializzo i task dei producer (scannerizzano l'albero in BFS)
-            var producerTask = RunProducer(ct);
-
-            // 4. inizializzo i task dei consumer (spostano i file direttamente)
-            var consumerTasks = CreateConsumerTasks(ct);
-
-            // 5. inizializzo il task per il monitor UI
-            var monitorTask = CreateMonitorTask(ct);
-
-            // # gestione chiusura channels e tasks
-            // attendo che i consumer svuotino il channel
-            await Task.WhenAll(consumerTasks);
-            await producerTask;
-            // i consumer hanno finito, l'operazione di move è tecnicamente completa.
-            State.IsProcessing = false;
-            await monitorTask;
-
-            // 6. stampa statistiche finali
-            PrintFinalStatistics();
+            Help();
+            return;
         }
 
-        // # ---------------------------------- #
-        // Parsing e validazione Settings
-        // # ---------------------------------- #
-        #endregion
-        #region parse settings
-        /// <summary>
-        /// Analizza e valida i parametri di input per sorgente e destinazione.
-        /// Accede a: State (per popolarlo)
-        /// </summary>
-        private bool ParseAndValidateSettings(MoveSettings settings)
+        State = new MoveState();
+        Errors.Clear();
+
+        if (!ParseAndValidateSettings(settings)) return;
+
+        ConsolePlus.Write($"[Cyan]#[/] Avvio spostamento verso [Yellow]{State.DestinationPath}[/] ... {(State.IsDebug ? "(DEBUG)" : "")}");
+
+        await RunMoveSingleThread(ct);
+
+        if (!State.IsSilent && State.ProgressPrinted)
         {
-            // Valida Sorgente (deve esistere)
-            string? sourcePath = ParsePath(settings.SourcePath, checkPath: true);
-            if (string.IsNullOrEmpty(sourcePath)) return false;
+            Console.WriteLine();
+        }
 
-            // Valida Destinazione (non è detto che esista, la creiamo se manca)
-            string? destPath = ParsePath(settings.DestinationPath, checkPath: false);
-            if (string.IsNullOrEmpty(destPath)) return false;
+        PrintFinalStatistics();
+    }
 
-            // Evita un loop infinito se si cerca di spostare una cartella dentro se stessa
-            if (destPath.StartsWith(sourcePath, StringComparison.OrdinalIgnoreCase))
-            {
-                PrintError("La destinazione non può essere una sottocartella della cartella di origine.");
-                return false;
-            }
+    #endregion
 
-            State.SourcePath = sourcePath;
-            State.DestinationPath = destPath;
-            State.IsDebug = settings.Debug;
-            State.IsRecursive = settings.Recursive;
-            State.Overwrite = settings.Overwrite;
+    #region settings
 
-            State.AttributesToSkip = FileAttributes.System;
-            if (!settings.IncludeHidden) State.AttributesToSkip |= FileAttributes.Hidden;
+    /// <summary>
+    /// valido sorgente/destinazione, preparo i filtri e inizializzo i flag di runtime.
+    /// blocco anche il caso in cui la destinazione ricade dentro la sorgente.
+    /// </summary>
+    /// <param name="settings">ricevo le impostazioni parseate dalla cli.</param>
+    /// <returns>restituisco true se la configurazione è valida e pronta all'esecuzione.</returns>
+    private bool ParseAndValidateSettings(MoveSettings settings)
+    {
+        string? sourcePath = ParsePath(settings.SourcePath, checkPath: true);
+        if (string.IsNullOrEmpty(sourcePath)) return false;
 
+        string? destPath = ParsePath(settings.DestinationPath, checkPath: false);
+        if (string.IsNullOrEmpty(destPath)) return false;
 
-            // Calcolo della distribuzione thread: 1/4 producer, 3/4 consumer
-            // Nel caso non-recursive: 1 producer, tutti gli altri consumer
-            int totalThreads = settings.Threads ?? Environment.ProcessorCount;
-            State.ConsumerCount = totalThreads;
+        if (destPath.StartsWith(sourcePath, StringComparison.OrdinalIgnoreCase))
+        {
+            PrintError("La destinazione non può essere una sottocartella della cartella di origine.");
+            return false;
+        }
 
-            var filterOpts = new FileFilterFactory.FilterOptions(
-                Pattern: ParseMatchPattern(settings.Pattern),
-                MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
-                IgnoreCase: settings.IgnoreCase,
-                ModifiedBefore: settings.OlderThan,
-                ModifiedAfter: settings.Since
-            );
+        State.SourcePath = sourcePath;
+        State.DestinationPath = destPath;
+        State.IsDebug = settings.Debug;
+        State.IsRecursive = settings.Recursive;
+        State.Overwrite = settings.Overwrite;
+        State.IgnoreErrors = settings.IgnoreErrors;
+        State.IsSilent = settings.Silence;
 
+        State.AttributesToSkip = FileAttributes.System;
+        if (!settings.IncludeHidden) State.AttributesToSkip |= FileAttributes.Hidden;
+
+        var filterOpts = new FileFilterFactory.FilterOptions(
+            Pattern: ParseMatchPattern(settings.Pattern),
+            MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
+            IgnoreCase: settings.IgnoreCase,
+            ModifiedBefore: settings.OlderThan,
+            ModifiedAfter: settings.Since
+        );
+
+        try
+        {
             State.FileFilter = FileFilterFactory.CreateFilter(filterOpts);
-
-            // Inizializza gli array per i contatori thread-safe
-            State.MovedFilesCountList = new long[State.ConsumerCount * CounterStride];
-            State.BytesMovedList = new long[State.ConsumerCount * CounterStride];
-
-            // Creazione cartella di destinazione root
-            if (!State.IsDebug && !Directory.Exists(State.DestinationPath))
-            {
-                try { Directory.CreateDirectory(State.DestinationPath); }
-                catch (Exception ex)
-                {
-                    PrintError($"Impossibile creare la directory di destinazione: {ex.Message}");
-                    return false;
-                }
-            }
-
-            return true;
+        }
+        catch (ArgumentException ex)
+        {
+            PrintError($"Il pattern fornito non è valido: {ex.Message}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            PrintError($"Errore durante la creazione dei filtri: {ex.Message}");
+            return false;
         }
 
-        // # ---------------------------------- #
-        // Inizializzazione dei Canali
-        // # ---------------------------------- #
-
-        /// <summary>
-        /// Crea i due canali di comunicazione:
-        /// - FileChannel (bounded): producer spedisce file ai consumer
-        /// </summary>
-        private void InitializeChannels()
+        if (!State.IsDebug && !Directory.Exists(State.DestinationPath))
         {
-            // Canale dei file limitato per backpressure: evita che i producer spediscano
-            // troppi file contemporaneamente se i consumer sono lenti
-            State.FileChannel = Channel.CreateBounded<StackFileInfo>(new BoundedChannelOptions(8192)
-            {
-                SingleWriter = false,
-                SingleReader = false,
-                FullMode = BoundedChannelFullMode.Wait
-            });
-
-            State.DirectoryCreated = 0;
-        }
-
-        // # ---------------------------------- #
-        // Creazione Task dei Producer (BFS)
-        // # ---------------------------------- #
-        #endregion
-        #region producer
-        /// <summary>
-        /// Crea un unico task producer che enumera l'albero sfruttando la ricorsione nativa di .NET.
-        /// 1. Delega la navigazione profonda a FileSystemEnumerable.
-        /// 2. Filtra i file on-the-fly.
-        /// 3. Crea la cartella di destinazione in modalità "lazy", ma ottimizzata tramite SequenceEqual.
-        /// 4. Spedisce i file validi al FileChannel per i consumer.
-        /// </summary>
-        private async Task RunProducer(CancellationToken ct)
-        {
-            string baseDestination = State.DestinationPath;
-            int sourceRootLength = State.SourcePath.Length;
-            if (!State.SourcePath.EndsWith(Path.DirectorySeparatorChar))
-            {
-                sourceRootLength++;
-            }
-
-            // mi tengo largo per ospitare qualsiasi albero
-            char[] directoryBuffer = ArrayPool<char>.Shared.Rent(4096);
-
-            // La variabile chiave per la lazy creation: ricorda l'ultima cartella creata
-            string? lastProcessedSourceDir = null;
-
             try
             {
-                var enumOptions = new EnumerationOptions
-                {
-                    IgnoreInaccessible = true,
-                    // Lasciamo che sia .NET a gestire la ricorsione in C++ nativo (molto più veloce)
-                    RecurseSubdirectories = State.IsRecursive,
-                    BufferSize = 64 * 1024,
-                    AttributesToSkip = State.AttributesToSkip
-                };
-
-                var entries = new FileSystemEnumerable<StackFileInfo>(
-                    State.SourcePath,
-                    (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
-                    enumOptions
-                )
-                {
-                    ShouldIncludePredicate = (ref FileSystemEntry entry) =>
-                    {
-                        ct.ThrowIfCancellationRequested();
-
-                        // DIRECTORY: Le ignoriamo, ci interessano solo i file per il FileChannel
-                        if (entry.IsDirectory) return false;
-
-                        // FILE: Filtro
-                        if (State.FileFilter != null && !State.FileFilter(ref entry)) return false;
-
-                        // FILE OK: Creazione Lazy Directory ottimizzata
-                        if (!State.IsDebug)
-                        {
-                            ReadOnlySpan<char> currentSourceDir = entry.Directory;
-
-                            // Entriamo nel blocco di creazione SOLO se la cartella è cambiata rispetto al file precedente
-                            if (lastProcessedSourceDir == null ||
-                                    currentSourceDir.Length != lastProcessedSourceDir.Length ||
-                                    !currentSourceDir.SequenceEqual(lastProcessedSourceDir.AsSpan()))
-                            {
-                                if (State.IsRecursive && currentSourceDir.Length > sourceRootLength)
-                                {
-                                    ReadOnlySpan<char> relativeSpan = currentSourceDir[sourceRootLength..];
-
-                                    Span<char> remaining = directoryBuffer.AsSpan();
-                                    remaining = remaining.PathCombine(baseDestination.AsSpan(), endWithSeparator: true);
-                                    remaining = remaining.PathCombine(relativeSpan, endWithSeparator: false);
-
-                                    int writtenChars = directoryBuffer.Length - remaining.Length;
-                                    string newDirectory = directoryBuffer.AsSpan(0, writtenChars).ToString();
-
-                                    // profiling sul tempo di creazione della cartella
-                                    long startTimestamp = Stopwatch.GetTimestamp();
-                                    try
-                                    {
-                                        Directory.CreateDirectory(newDirectory);
-                                        State.DirectoryCreated++;
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        throw new Exception($"errore Directory.CreateDirectory:\n\t[Yellow]{newDirectory}[/]\n\t{ex.Message}");
-                                    }
-                                    finally
-                                    {
-                                        // Calcoliamo quanto tempo è passato
-                                        TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
-                                        // Aggiungiamo i millisecondi al totale in modo thread-safe
-                                        Stats.TempoCreazioneCartelle += elapsed.TotalMilliseconds;
-                                    }
-                                }
-
-                                // Aggiorniamo la cache per i prossimi file che troveremo in questa stessa cartella
-                                lastProcessedSourceDir = currentSourceDir.ToString();
-                            }
-                        }
-
-                        return true; // Il file passa allo step successivo
-                    }
-                };
-
-                // Invio ai consumer: l'enumerazione fisica avviene qui
-                foreach (var entry in entries)
-                {
-                    await State.FileChannel!.Writer.WriteAsync(entry, ct);
-                }
+                Directory.CreateDirectory(State.DestinationPath);
             }
-            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                _errorsBag.Add(new MoveException("Producer", ex));
-                // mi fermo se ce stato un errore nel Producer
-                return;
-            }
-            finally
-            {
-                // un unico producer: quando finisce lui, ha finito tutto il sistema.
-                State.FileChannel?.Writer.TryComplete();
-
-                // Restituzione al pool
-                ArrayPool<char>.Shared.Return(directoryBuffer);
+                PrintError($"Impossibile creare la directory di destinazione: {ex.Message}");
+                return false;
             }
         }
 
-        // # ---------------------------------- #
-        // Creazione Task dei Consumer
-        // # ---------------------------------- #
-        #endregion
-        #region consumer
-        /// <summary>
-        /// Crea i task consumer che leggono dal FileChannel e spendono i file direttamente.
-        /// I consumer NON si preoccupano di creare le cartelle: i producer l'hanno già fatto.
-        /// </summary>
-        private Task[] CreateConsumerTasks(CancellationToken ct)
+        State.SourceRootLength = State.SourcePath.Length;
+        if (!State.SourcePath.EndsWith(Path.DirectorySeparatorChar) && !State.SourcePath.EndsWith(Path.AltDirectorySeparatorChar))
         {
-            var tasks = new Task[State.ConsumerCount];
+            State.SourceRootLength++;
+        }
 
-            for (int i = 0; i < State.ConsumerCount; i++)
+        return true;
+    }
+
+    #endregion
+
+    #region execution
+
+    /// <summary>
+    /// eseguo il move in single-thread usando filesystemenumerable come producer diretto.
+    /// per ogni file applico filtri, preparo directory di destinazione in lazy creation e poi sposto l'elemento.
+    /// </summary>
+    /// <param name="ct">uso il token per interrompere rapidamente enumerazione e move.</param>
+    private Task RunMoveSingleThread(CancellationToken ct)
+    {
+        string? lastProcessedSourceDir = null;
+        char[] directoryBuffer = ArrayPool<char>.Shared.Rent(4096);
+        char[] destinationBuffer = ArrayPool<char>.Shared.Rent(4096);
+
+        try
+        {
+            #region producer
+            var enumOptions = new EnumerationOptions
             {
-                int consumerId = i;
-                tasks[i] = Task.Run(async () =>
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = State.IsRecursive,
+                BufferSize = 64 * 1024,
+                AttributesToSkip = State.AttributesToSkip
+            };
+
+            var entries = new FileSystemEnumerable<StackFileInfo>(
+                State.SourcePath,
+                (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
+                enumOptions)
+            {
+                ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                 {
-                    long localFlushMoved = 0;
-                    long localFlushBytes = 0;
-                    int slot = consumerId * CounterStride;
-                    // definisco un buffer riutilizzabile
-                    char[] pathBuffer = new char[1024];
+                    ct.ThrowIfCancellationRequested();
 
-                    try
+                    if (entry.IsDirectory) return false;
+                    if (State.FileFilter != null && !State.FileFilter(ref entry)) return false;
+
+                    if (!State.IsDebug)
                     {
-                        await foreach (var item in State.FileChannel!.Reader.ReadAllAsync(ct))
+                        ReadOnlySpan<char> currentSourceDir = entry.Directory;
+
+                        // confronto la directory corrente con l'ultima processata:
+                        // quando cambia, creo una sola volta la destinazione relativa e la riuso per i file successivi.
+                        if (lastProcessedSourceDir == null ||
+                            currentSourceDir.Length != lastProcessedSourceDir.Length ||
+                            !currentSourceDir.SequenceEqual(lastProcessedSourceDir.AsSpan()))
                         {
-                            try
+                            if (State.IsRecursive && currentSourceDir.Length > State.SourceRootLength)
                             {
-                                // creo lo span dentro il ciclo
-                                // muore ad ogni iterazione
-                                Span<char> targetFullPath = pathBuffer.AsSpan();
-                                Span<char> remaining = targetFullPath;
-
-                                ReadOnlySpan<char> name = item.AsNameSpan();
-
-                                if (State.IsRecursive)
-                                {
-                                    int sourceRootLength = State.SourcePath.Length;
-                                    ReadOnlySpan<char> sourceDirSpan = item.AsDirectorySpan();
-
-                                    remaining = remaining.PathCombine(State.DestinationPath.AsSpan(), true);
-
-                                    // aggiungo relative path solo se necessario
-                                    if (sourceDirSpan.Length > sourceRootLength)
-                                    {
-                                        ReadOnlySpan<char> relativeSpan = sourceDirSpan[sourceRootLength..];
-                                        remaining = remaining.PathCombine(relativeSpan, true);
-                                    }
-
-                                    remaining = remaining.AppendNext(name);
-                                }
-                                else
-                                {
-                                    remaining = remaining
-                                        .PathCombine(State.DestinationPath.AsSpan())
-                                        .PathCombine(name);
-                                }
-
-                                // calcolo automatico della dimensione effettiva del path
-                                int actualPathSize = targetFullPath.Length - remaining.Length;
-
-                                // Spostamento fisico
-                                var destination = targetFullPath[..actualPathSize];
-                                try
-                                {
-                                    NativeIO.Move(item.AsPathSpan(), destination, State.Overwrite);
-                                }
-                                catch (Exception ex)
-                                {
-                                    throw new Exception($"errore File.Move da:\n\t[Yellow]{item.AsPathSpan()}[/]\n\ta\n\t[Yellow]{destination}[/]: {ex.Message}");
-                                }
-                                // Aggiornamento contatori
-                                localFlushMoved++;
-                                localFlushBytes += item.Length;
-
-                                // Flush
-                                if ((localFlushMoved & FlushMask) == 0)
-                                {
-                                    State.MovedFilesCountList[slot] += localFlushMoved;
-                                    State.BytesMovedList[slot] += localFlushBytes;
-                                    localFlushMoved = 0;
-                                    localFlushBytes = 0;
-                                }
-
-                                ct.ThrowIfCancellationRequested();
+                                EnsureDestinationDirectoryLazy(currentSourceDir, directoryBuffer);
                             }
-                            catch (OperationCanceledException) { throw; }
-                            catch (Exception ex)
-                            {
-                                _errorsBag.Add(new MoveException("Consumer", ex));
-                            }
-                            finally
-                            {
-                                item.Dispose();
-                            }
+
+                            lastProcessedSourceDir = currentSourceDir.ToString();
                         }
                     }
-                    catch (OperationCanceledException) { }
-                    finally
-                    {
-                        // Flush dei dati rimasti
-                        State.MovedFilesCountList[slot] += localFlushMoved;
-                        State.BytesMovedList[slot] += localFlushBytes;
-                    }
-                }, ct);
-            }
 
-            return tasks;
-        }
+                    return true;
+                }
+            };
 
-        // # ---------------------------------- #
-        // Creazione del Monitor UI
-        // # ---------------------------------- #
-        #endregion
-        #region monitor
-        /// <summary>
-        /// Monitor UI con Spectre.Console per le metriche di spostamento
-        /// </summary>
-        private Task CreateMonitorTask(CancellationToken ct)
-        {
-            return Task.Run(async () =>
+            #endregion
+            #region consumer
+
+            foreach (var item in entries)
             {
-                if (State.IsDebug) return;
-
-                long lastTotalMoved = 0;
-                long lastTotalBytes = 0;
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                ct.ThrowIfCancellationRequested();
 
                 try
                 {
-                    // Usiamo un contenitore generico all'inizio
-                    await AnsiConsole.Live(new Text(""))
-                        .Cropping(VerticalOverflowCropping.Bottom)
-                        .StartAsync(async ctx =>
-                        {
-                            while (State.IsProcessing && !ct.IsCancellationRequested)
-                            {
-                                long currentTotalMoved = 0;
-                                long currentTotalBytes = 0;
-
-                                // 1. GRID DEI WORKER (Colonne fisse per la precisione)
-                                var workerGrid = new Grid()
-                                    .AddColumn(new GridColumn().Width(4).NoWrap()) // T-00 - thread
-                                    .AddColumn(new GridColumn().Width(11).RightAligned().NoWrap()) // 999.999.999 - file spostati
-                                    .AddColumn(new GridColumn().NoWrap().LeftAligned()); // barra scorrimento
-
-                                for (int i = 0; i < State.ConsumerCount; i++)
-                                {
-                                    long totalMoved = Volatile.Read(ref State.MovedFilesCountList[i * CounterStride]);
-                                    long totalBytes = Volatile.Read(ref State.BytesMovedList[i * CounterStride]);
-
-                                    currentTotalMoved += totalMoved;
-                                    currentTotalBytes += totalBytes;
-
-                                    long currentProgress = totalMoved % 4096;
-                                    int dashesCount = (int)(currentProgress / 102);
-                                    string bar = new string('-', dashesCount).PadRight(40, ' ');
-
-                                    workerGrid.AddRow(
-                                        $"[yellow]C-{i:D2}[/]",
-                                        $"[cyan]{totalMoved:N0}[/]",
-                                        $"[grey]|[/][green]{bar}[/][grey]|[/]"
-                                    );
-                                }
-
-                                // Calcoli velocità
-                                double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
-                                double filesPerSecond = elapsedSeconds > 0 ? (currentTotalMoved - lastTotalMoved) / elapsedSeconds : 0;
-                                double bytesPerSecond = elapsedSeconds > 0 ? (currentTotalBytes - lastTotalBytes) / elapsedSeconds : 0;
-                                lastTotalMoved = currentTotalMoved;
-                                lastTotalBytes = currentTotalBytes;
-                                stopwatch.Restart();
-
-                                // 2. GRID DEL SOMMARIO (Una sola colonna larga che NON wrappa)
-                                var summaryGrid = new Grid().AddColumn(new GridColumn().NoWrap());
-                                summaryGrid.AddEmptyRow();
-
-                                summaryGrid.AddRow($"[magenta]>[/] [white]Totale Spostati :[/] [cyan]{currentTotalMoved:N0}[/]");
-                                summaryGrid.AddRow($"[magenta]>[/] [white]Dati Trasferiti :[/] [magenta]{Formatter.Bytes(currentTotalBytes)}[/]");
-
-                                string speedStr = Formatter.Bytes((long)bytesPerSecond);
-                                string fpsStr = $"{(int)filesPerSecond:N0} f/s";
-                                summaryGrid.AddRow($"[magenta]>[/] [white]Velocità Rete   :[/] [green]{speedStr}/s[/] [grey]({fpsStr})[/]");
-
-                                // 3. UNIAMO TUTTO (Rows permette di impilare le due Grid)
-                                ctx.UpdateTarget(new Rows(workerGrid, summaryGrid));
-
-                                await Task.Delay(250, ct);
-                            }
-                        });
+                    if (State.IsDebug)
+                    {
+                        ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
+                    }
+                    else
+                    {
+                        MoveSingleItem(item, destinationBuffer);
+                    }
                 }
-                catch (TaskCanceledException) { }
-            }, ct);
-        }
-
-        #endregion
-        #region stats
-        // # ---------------------------------- #
-        // Stampa delle statistiche finali
-        // # ---------------------------------- #
-
-        private void PrintFinalStatistics()
-        {
-            long totalMoved = 0;
-            long totalBytesMoved = 0;
-
-            for (int i = 0; i < State.ConsumerCount; i++)
-            {
-                totalMoved += State.MovedFilesCountList[i * CounterStride];
-                totalBytesMoved += State.BytesMovedList[i * CounterStride];
-            }
-
-            ConsolePlus.WriteHr(25);
-            ConsolePlus.Write($"[Cyan]#[/] Operazione Conclusa.");
-            ConsolePlus.Write($"[Cyan]*[/] File spostati   : [Cyan]{totalMoved:N0}[/]");
-            ConsolePlus.Write($"[Cyan]*[/] Dati trasferiti : [Green]{Formatter.Bytes(totalBytesMoved)}[/]");
-            ConsolePlus.Write($"[Cyan]*[/] Cartelle create : [Cyan]{State.DirectoryCreated:N0}[/]");
-            ConsolePlus.Write($"[Cyan]*[/] Tempo cartelle  : [Green]{Stats.TempoCreazioneCartelle:F2} ms[/]");
-            ConsolePlus.WriteHr(25);
-            // # se ci sono stati errori li leggo
-            if (!_errorsBag.IsEmpty)
-            {
-                ConsolePlus.Write($"[Red]#[/] sono state riscontrate le seguenti eccezioni:");
-                int i = 0;
-                foreach (var ex in _errorsBag)
+                catch (Exception ex)
                 {
-                    i++;
-                    ConsolePlus.Write($"[Red]#[/] {i}. [Red]{ex.Section}[/]: {ex.Message}\n[Red]#[/]");
+                    if (!HandleMoveError(ex)) throw;
                 }
+                finally
+                {
+                    item.Dispose();
+                }
+
+                PrintProgressIfNeeded();
             }
         }
-        #endregion
-        public override void Help()
+        finally
         {
-            PrintHelp<MoveSettings>();
+            ArrayPool<char>.Shared.Return(directoryBuffer);
+            ArrayPool<char>.Shared.Return(destinationBuffer);
+        }
+
+        #endregion
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// creo la cartella di destinazione solo quando mi serve davvero.
+    /// compongo il path con span per ridurre allocazioni durante i passaggi più caldi.
+    /// </summary>
+    /// <param name="currentSourceDir">ricevo la directory sorgente del file corrente.</param>
+    /// <param name="directoryBuffer">riuso questo buffer per costruire il path di destinazione.</param>
+    private void EnsureDestinationDirectoryLazy(ReadOnlySpan<char> currentSourceDir, char[] directoryBuffer)
+    {
+        ReadOnlySpan<char> relativeSpan = currentSourceDir[State.SourceRootLength..];
+
+        Span<char> remaining = directoryBuffer.AsSpan();
+        remaining = remaining.PathCombine(State.DestinationPath.AsSpan(), endWithSeparator: true);
+        remaining = remaining.PathCombine(relativeSpan, endWithSeparator: false);
+
+        int writtenChars = directoryBuffer.Length - remaining.Length;
+        string newDirectory = directoryBuffer.AsSpan(0, writtenChars).ToString();
+
+        long startTimestamp = Stopwatch.GetTimestamp();
+        Directory.CreateDirectory(newDirectory);
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+
+        State.DirectoryCreated++;
+        State.DirectoryCreationMs += elapsed.TotalMilliseconds;
+    }
+
+    /// <summary>
+    /// costruisco il path di destinazione del file corrente e invoco nativeio.move.
+    /// </summary>
+    /// <param name="item">ricevo il file da spostare.</param>
+    /// <param name="destinationBuffer">riuso questo buffer per evitare nuove stringhe nel path di successo.</param>
+    private void MoveSingleItem(StackFileInfo item, char[] destinationBuffer)
+    {
+        Span<char> destinationSpan = destinationBuffer.AsSpan();
+        Span<char> remaining = destinationSpan;
+
+        ReadOnlySpan<char> sourceDirSpan = item.AsDirectorySpan();
+        ReadOnlySpan<char> nameSpan = item.AsNameSpan();
+
+        if (State.IsRecursive)
+        {
+            remaining = remaining.PathCombine(State.DestinationPath.AsSpan(), endWithSeparator: true);
+
+            if (sourceDirSpan.Length > State.SourceRootLength)
+            {
+                ReadOnlySpan<char> relativeSpan = sourceDirSpan[State.SourceRootLength..];
+                remaining = remaining.PathCombine(relativeSpan, endWithSeparator: true);
+            }
+
+            remaining = remaining.AppendNext(nameSpan);
+        }
+        else
+        {
+            remaining = remaining.PathCombine(State.DestinationPath.AsSpan(), endWithSeparator: true);
+            remaining = remaining.AppendNext(nameSpan);
+        }
+
+        int actualPathSize = destinationSpan.Length - remaining.Length;
+        ReadOnlySpan<char> destinationPath = destinationSpan[..actualPathSize];
+
+        NativeIO.Move(item.AsPathSpan(), destinationPath, State.Overwrite);
+
+        State.MovedFilesCount++;
+        State.BytesMoved += item.Length;
+    }
+
+    #endregion
+
+    #region errors_and_progress
+
+    /// <summary>
+    /// raccolgo l'errore e decido se continuare in base al flag ignore-errors.
+    /// </summary>
+    /// <param name="ex">ricevo l'eccezione nata durante lo spostamento di un file.</param>
+    /// <returns>restituisco true se posso continuare, false se devo interrompere il flusso.</returns>
+    private bool HandleMoveError(Exception ex)
+    {
+        Errors.Add(new MoveException("Move", ex));
+        return State.IgnoreErrors;
+    }
+
+    /// <summary>
+    /// stampo un progresso minimale ogni circa 250ms per non rallentare il ciclo principale con output eccessivo.
+    /// </summary>
+    private void PrintProgressIfNeeded()
+    {
+        if (State.IsSilent || State.IsDebug) return;
+
+        long nowMs = Environment.TickCount64;
+        if (nowMs - State.LastProgressTickMs < 250) return;
+
+        State.LastProgressTickMs = nowMs;
+        State.ProgressPrinted = true;
+
+        Console.Write($"\rFile spostati: {State.MovedFilesCount:N0} | Dati: {Formatter.Bytes(State.BytesMoved)}     ");
+    }
+
+    #endregion
+
+    #region output
+
+    /// <summary>
+    /// stampo il riepilogo finale con i contatori principali e l'eventuale lista errori accumulata.
+    /// </summary>
+    private void PrintFinalStatistics()
+    {
+        ConsolePlus.WriteHr(25);
+        ConsolePlus.Write("[Cyan]#[/] Operazione Conclusa.");
+        ConsolePlus.Write($"[Cyan]*[/] File spostati   : [Cyan]{State.MovedFilesCount:N0}[/]");
+        ConsolePlus.Write($"[Cyan]*[/] Dati trasferiti : [Green]{Formatter.Bytes(State.BytesMoved)}[/]");
+        ConsolePlus.Write($"[Cyan]*[/] Cartelle create : [Cyan]{State.DirectoryCreated:N0}[/]");
+        ConsolePlus.Write($"[Cyan]*[/] Tempo cartelle  : [Green]{State.DirectoryCreationMs:F2} ms[/]");
+        ConsolePlus.WriteHr(25);
+
+        if (Errors.Count > 0)
+        {
+            ConsolePlus.Write("[Red]#[/] sono state riscontrate le seguenti eccezioni:");
+            int i = 0;
+            foreach (var ex in Errors)
+            {
+                i++;
+                ConsolePlus.Write($"[Red]#[/] {i}. [Red]{ex.Section}[/]: {ex.Message}\n[Red]#[/]");
+            }
         }
     }
+
+    /// <summary>
+    /// mostro l'help standard del comando move.
+    /// </summary>
+    public override void Help()
+    {
+        PrintHelp<MoveSettings>();
+    }
+
+    #endregion
 }

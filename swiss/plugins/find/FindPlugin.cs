@@ -347,32 +347,35 @@ class FindPlugin : Plugin
     /// </summary>
     private void PrintSimpleMatch(StackFileInfo item)
     {
-        if (State.Format == OutputFormat.Console)
+        using (item)
         {
-            // Logica console originale, user-friendly e colorata
-            if (item.IsDirectory)
-                ConsolePlus.Write($"[Magenta]{item.AsPathSpan()}[/]");
+            if (State.Format == OutputFormat.Console)
+            {
+                // Logica console originale, user-friendly e colorata
+                if (item.IsDirectory)
+                    ConsolePlus.Write($"[Magenta]{item.AsPathSpan()}[/]");
+                else
+                    ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
+            }
             else
-                ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
-        }
-        else
-        {
-            // Logica strutturata (JSON/CSV)
-            var data = new FindResultData(
-                item.AsDirectorySpan(),
-                item.AsNameSpan(),
-                item.IsDirectory,
-                item.Length,
-                new DateTimeOffset(item.LastWriteTime).ToUnixTimeMilliseconds()
-            );
+            {
+                // Logica strutturata (JSON/CSV)
+                var data = new FindResultData(
+                    item.AsDirectorySpan(),
+                    item.AsNameSpan(),
+                    item.IsDirectory,
+                    item.Length,
+                    new DateTimeOffset(item.LastWriteTime).ToUnixTimeMilliseconds()
+                );
 
-            // Il Source Generator ha creato questi metodi autonomamente
-            var (owner, length) = State.Format == OutputFormat.Json
-                ? data.ToJson()
-                : data.ToCsv();
+                // Il Source Generator ha creato questi metodi autonomamente
+                var (owner, length) = State.Format == OutputFormat.Json
+                    ? data.ToJson()
+                    : data.ToCsv();
 
-            // Invia al Channel
-            State.Printer.Post(owner, length);
+                // Invia al Channel
+                State.Printer.Post(owner, length);
+            }
         }
     }
 

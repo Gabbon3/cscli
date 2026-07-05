@@ -20,6 +20,7 @@ namespace plugins.regexgrep
 
         // # stato condiviso tra i metodi
         private RegexGrepState State = new();
+        private RegexTelemetry Telemetry = new();
 
         // # attributi
         private bool IgnoreCase = false;
@@ -34,18 +35,9 @@ namespace plugins.regexgrep
         private const int OutputBufferSize = 16384; // 16 KB per l'output formattato
         private const int MaxMatchSize = 400; // Limite massimo di caratteri stampabili per il singolo match
         private static readonly int FilesChannelBound = 8192;
-        private long TotalMatchCount = 0;
-        private long TotalSizeVisited = 0;
-        private long TotalFileFounded = 0;
-        private long TotalFileProcessed = 0;
         private const int ByteBufferSize = 65536;
         private const int CharBufferSize = 65536;
         private const int ByteOverlapSize = 4096; // circa 1365 char circa nel peggiore dei casi in UTF-8 (1 char max 3 byte)
-
-        // altre statistiche
-        // -- statistiche sulle scritture del channel
-        private long ChannelWriteSync = 0;
-        private long ChannelWriteAsync = 0;
 
         #region Structs
 
@@ -82,6 +74,19 @@ namespace plugins.regexgrep
             public Channel<GrepFileEntry> FilesChannel = Channel.CreateBounded<GrepFileEntry>(1);
         }
 
+        /// <summary>
+        /// classe di telemetria per il comando regex
+        /// </summary>
+        private class RegexTelemetry
+        {
+            public long TotalMatchCount = 0;
+            public long TotalSizeVisited = 0;
+            public long TotalFileFounded = 0;
+            public long TotalFileProcessed = 0;
+            public long ChannelWriteSync = 0;
+            public long ChannelWriteAsync = 0;
+        }
+
         #endregion
         #region RunAsync
 
@@ -100,10 +105,11 @@ namespace plugins.regexgrep
             }
 
             State = new RegexGrepState();
+            Telemetry = new RegexTelemetry();
             // 2. valido i configuro stati e attributi della classe
             if (!ParseAndValidateSettings(settings)) return;
-            // 3. valido e verifico la regex (solo se uso effettivamente la regex)
-            if (!settings.FixedPattern) ValidateAndTestRegex(settings.Pattern);
+            // 3. valido e verifico il pattern di ricerca
+            ValidateAndTestPattern(settings.Pattern, settings.FixedPattern);
             // 4. configuro i filtri delle directory
             ConfigureDirectoryFilters(settings);
             // 5. inizializzo il motore regex e il channel
@@ -136,12 +142,12 @@ namespace plugins.regexgrep
             if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
             ConsolePlus.WriteBoxHeader($"Ricerca completata", 40);
             ConsolePlus.WriteList([
-                $"Match totali: [Green]{TotalMatchCount:N0}[/]",
-                $"File totali trovati: [DarkGray]{TotalFileFounded:N0}[/]",
-                $"File totali processati: [Magenta]{TotalFileProcessed:N0}[/]",
-                $"Spazio totale controllato: [Blue]{Formatter.Bytes(TotalSizeVisited)}[/]",
-                $"Throughput: [Cyan]{Formatter.Throughput(TotalSizeVisited, elapsed.TotalSeconds)}[/]",
-                $"Scritture Channel: [DarkGray]sync {ChannelWriteSync} - async {ChannelWriteAsync}[/]"
+                $"Match totali: [Green]{Telemetry.TotalMatchCount:N0}[/]",
+                $"File totali trovati: [DarkGray]{Telemetry.TotalFileFounded:N0}[/]",
+                $"File totali processati: [Magenta]{Telemetry.TotalFileProcessed:N0}[/]",
+                $"Spazio totale controllato: [Blue]{Formatter.Bytes(Telemetry.TotalSizeVisited)}[/]",
+                $"Throughput: [Cyan]{Formatter.Throughput(Telemetry.TotalSizeVisited, elapsed.TotalSeconds)}[/]",
+                $"Scritture Channel: [DarkGray]sync {Telemetry.ChannelWriteSync} - async {Telemetry.ChannelWriteAsync}[/]"
             ]);
             ConsolePlus.WriteHr(40);
         }
@@ -171,9 +177,9 @@ namespace plugins.regexgrep
             }
 
             // # Configuro FastPrinter
-            
+
             State.Format = FastPrinter.GetOutputFormat(settings.Format);
-            
+
             IFastOutput printerOutput = FastPrinter.GenerateFastOutput(State.Format, settings.Silence, settings.OutputFile);
 
             var fastPrinterOptions = new FastPrinter.FastPrinterOptions(
@@ -181,16 +187,6 @@ namespace plugins.regexgrep
                 capacity: 10_000);
 
             _fastPrinter = new FastPrinter(fastPrinterOptions);
-
-            // stampo l'header solo per il caso del CSV
-            if (State.Format == OutputFormat.Csv)
-            {
-                string header = CountOnly
-                    ? "Path;Count\n"
-                    : "Path;Line;Column;Length;PreMatch;Match;PostMatch\n";
-
-                _fastPrinter.TryPost(header);
-            }
 
             // ---
 
@@ -212,16 +208,35 @@ namespace plugins.regexgrep
             }
             FixedPattern = settings.FixedPattern;
 
+            // stampo l'header solo per il caso del CSV
+            if (State.Format == OutputFormat.Csv)
+            {
+                string header = CountOnly
+                    ? "Path;Count\n"
+                    : "Path;Line;Column;Length;PreMatch;Match;PostMatch\n";
+
+                _fastPrinter.TryPost(header);
+            }
+
             return true;
         }
 
         #endregion
         #region Pattern & Regex
 
-        private void ValidateAndTestRegex(string pattern)
+        private void ValidateAndTestPattern(string pattern, bool isFixed)
         {
+            // verifico che il pattern non sia vuoto
+            if (string.IsNullOrEmpty(pattern))
+            {
+                throw new ArgumentException($"Il pattern di ricerca non puo essere vuoto o nullo: '{pattern}'");
+            }
+            // fixed o meno assegno il pattern
             State.Pattern = pattern;
+            // se fixed non devo fare altri controlli ed esco
+            if (isFixed) return;
 
+            // Controlli pattern Regex
             try
             {
                 // Test compilation con timeout per evitare blocchi
@@ -233,13 +248,11 @@ namespace plugins.regexgrep
             }
             catch (RegexParseException ex)
             {
-                PrintError($"Pattern regex non valido: {ex.Message}");
-                throw;
+                throw new InvalidOperationException($"Pattern regex non valido: {ex.Message}");
             }
             catch (ArgumentException ex)
             {
-                PrintError($"Errore nel pattern: {ex.Message}");
-                throw;
+                throw new InvalidOperationException($"Errore nel pattern: {ex.Message}");
             }
         }
 
@@ -355,13 +368,13 @@ namespace plugins.regexgrep
                 foreach (var grepFileEntry in enumerable)
                 {
                     if (ct.IsCancellationRequested) break;
-                    TotalFileFounded++;
-                    ChannelWriteSync++;
+                    Telemetry.TotalFileFounded++;
+                    Telemetry.ChannelWriteSync++;
                     if (!State.FilesChannel.Writer.TryWrite(grepFileEntry))
                     {
                         await State.FilesChannel.Writer.WriteAsync(grepFileEntry, ct);
-                        ChannelWriteSync--;
-                        ChannelWriteAsync++;
+                        Telemetry.ChannelWriteSync--;
+                        Telemetry.ChannelWriteAsync++;
                     }
                 }
             }
@@ -407,9 +420,9 @@ namespace plugins.regexgrep
                     }
                     finally
                     {
-                        Interlocked.Add(ref TotalMatchCount, threadMatchCount);
-                        Interlocked.Add(ref TotalFileProcessed, localTotalFileProcessed);
-                        Interlocked.Add(ref TotalSizeVisited, localTotalByteSizeVisited);
+                        Interlocked.Add(ref Telemetry.TotalMatchCount, threadMatchCount);
+                        Interlocked.Add(ref Telemetry.TotalFileProcessed, localTotalFileProcessed);
+                        Interlocked.Add(ref Telemetry.TotalSizeVisited, localTotalByteSizeVisited);
                     }
                 }, ct);
             }

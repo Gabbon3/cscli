@@ -99,7 +99,7 @@ public class FastOutputGenerator : IIncrementalGenerator
     {
         sb.AppendLine("    public (IMemoryOwner<char> Owner, int Length) ToJson()");
         sb.AppendLine("    {");
-        sb.AppendLine("        var owner = MemoryPool<char>.Shared.Rent(512);");
+        sb.AppendLine("        var owner = MemoryPool<char>.Shared.Rent(1024);");
         sb.AppendLine("        var span = owner.Memory.Span;");
         sb.AppendLine("        int pos = 0;");
         sb.AppendLine();
@@ -146,7 +146,7 @@ public class FastOutputGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine("            \"}\".AsSpan().AppendTo(span, ref pos);");
-        sb.AppendLine("            \"}\\n\".AsSpan().AppendTo(span, ref pos);");
+        sb.AppendLine("            '\\n'.AppendTo(span, ref pos);");
         sb.AppendLine("            return (owner, pos);");
         sb.AppendLine("        }");
         sb.AppendLine("        catch (ArgumentOutOfRangeException)");
@@ -162,7 +162,7 @@ public class FastOutputGenerator : IIncrementalGenerator
     {
         sb.AppendLine("    public (IMemoryOwner<char> Owner, int Length) ToCsv()");
         sb.AppendLine("    {");
-        sb.AppendLine("        var owner = MemoryPool<char>.Shared.Rent(512);");
+        sb.AppendLine("        var owner = MemoryPool<char>.Shared.Rent(1024);");
         sb.AppendLine("        var span = owner.Memory.Span;");
         sb.AppendLine("        int pos = 0;");
         sb.AppendLine();

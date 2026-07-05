@@ -9,7 +9,7 @@ partial struct GrepCountData
 {
     public (IMemoryOwner<char> Owner, int Length) ToJson()
     {
-        var owner = MemoryPool<char>.Shared.Rent(512);
+        var owner = MemoryPool<char>.Shared.Rent(1024);
         var span = owner.Memory.Span;
         int pos = 0;
 
@@ -23,7 +23,7 @@ partial struct GrepCountData
             "\"Count\":".AsSpan().AppendTo(span, ref pos);
             Count.AppendTo(span, ref pos);
             "}".AsSpan().AppendTo(span, ref pos);
-            "}\n".AsSpan().AppendTo(span, ref pos);
+            '\n'.AppendTo(span, ref pos);
             return (owner, pos);
         }
         catch (ArgumentOutOfRangeException)
@@ -35,7 +35,7 @@ partial struct GrepCountData
 
     public (IMemoryOwner<char> Owner, int Length) ToCsv()
     {
-        var owner = MemoryPool<char>.Shared.Rent(512);
+        var owner = MemoryPool<char>.Shared.Rent(1024);
         var span = owner.Memory.Span;
         int pos = 0;
 
