@@ -328,8 +328,8 @@ namespace plugins.regexgrep
 
             var filterOpts = new FileFilterFactory.FilterOptions(
                 // forzo il glob per semplicita
-                Pattern: settings.Glob,
-                MatchType: FilterFileNameMatchType.Glob,
+                Pattern: settings.PatternFileFilter,
+                MatchType: FilterFileNameMatchType.Regex,
                 // Filtri sulle date file (modifica)
                 ModifiedBefore: settings.OlderThan,
                 ModifiedAfter: settings.Since

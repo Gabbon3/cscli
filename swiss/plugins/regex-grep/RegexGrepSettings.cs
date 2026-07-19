@@ -47,8 +47,8 @@ namespace plugins.regexgrep
         [Option("dir-include|in", "Riabilita cartelle escluse di default (separate da virgola)", "Filtri")]
         public string? IncludeDirs { get; set; }
 
-        [Option("glob|g", "Cerca solo nei file che corrispondono al pattern (es. *.cs,*.txt)", "Filtri")]
-        public string? Glob { get; set; }
+        [Option("pattern|p", "Cerca solo nei file che corrispondono al pattern regex", "Filtri")]
+        public string? PatternFileFilter { get; set; }
 
         [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
         public DateTime? Since { get; set; } 
