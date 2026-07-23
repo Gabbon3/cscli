@@ -30,6 +30,9 @@ namespace plugins.find
         [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Configurazione")]
         public DateTime? OlderThan { get; set; }
 
+        [Option(CliMeta.JustEnoughOutputFlag, CliMeta.JustEnoughOutputDesc, "Configurazione")]
+        public bool JustEnoughOutput { get; set; } = false;
+
         [Option("recurse|r", "Se attivo ricerca anche nelle sottocartelle", "Configurazione")]
         public bool RecurseSubdirectories { get; set; } = false;
 

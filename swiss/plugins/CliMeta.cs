@@ -19,6 +19,8 @@ public static class CliMeta
     public const string SilenceDesc = "Se attivo non mostra risultati di progessione a console";
     public const string HiddenFlag = "hidden|H";
     public const string HiddenDesc = "Se attivo include i file nascosti nell'enumerazione";
+    public const string JustEnoughOutputFlag = "just-enough-output|jeo";
+    public const string JustEnoughOutputDesc = "Se attivo mostra il minimo indispensabile di output a console";
 
     // --- FLAG E DESCRIZIONI: OUTPUT --- 
     public const string FormatFlag = "format|F";

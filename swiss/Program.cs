@@ -19,8 +19,8 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.0.9";
-const string versionDescription = "Grep file pattern";
+const string version = "2.1.0";
+const string versionDescription = "Walker supporta counters";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();

@@ -1,4 +1,5 @@
 using System.IO.Enumeration;
+using System.Diagnostics;
 using lib.io;
 using lib.io.stack;
 using lib.console;
@@ -56,8 +57,9 @@ class FindPlugin : Plugin
         public bool Recurse = false;
         public bool IsRanking = false;
         public int MatchCount = 0;
+        public FastWalkerCounters Counters = new();
+        public Stopwatch ScanTimer = new();
         public OutputFormat Format = OutputFormat.Console;
-
         public FastPrinter Printer = default!;
         public PriorityQueue<StackFileInfo, long>? PriorityQueue;
         public Action<StackFileInfo>? ProcessItemStrategy;
@@ -78,7 +80,7 @@ class FindPlugin : Plugin
     #region RunAsync
 
     // # ---------------------------------- #
-    // RunAsync — diagramma di flusso
+    // RunAsync - diagramma di flusso
     // # ---------------------------------- #
     public override async Task RunAsync(string[] args, CancellationToken ct)
     {
@@ -90,6 +92,11 @@ class FindPlugin : Plugin
             return;
         }
 
+        // print di avvio
+        if (!settings.JustEnoughOutput) {
+            ConsolePlus.Write($"[Cyan]#[/] Avvio ricerca...\n");
+        }
+            
         State = new FindState();
         // 2. valido e parsifico le settings
         if (!ParseAndValidateSettings(settings, ct)) return;
@@ -100,12 +107,14 @@ class FindPlugin : Plugin
         // 5. creo la configurazione del FastWalker
         var walkerOptions = CreateWalkerOptions(settings);
         // 6. avvio il processo principale, inizio la ricerca
+        State.ScanTimer.Restart();
         await ProcessFilesAsync(walkerOptions, ct);
+        State.ScanTimer.Stop();
         // 7. stampo la top n (se richiesta)
         if (State.IsRanking) PrintRankingResults();
         // 8. statistiche finali
         await State.Printer.Complete();
-        PrintFinalSummary();
+        if (!settings.JustEnoughOutput) PrintFinalSummary();
     }
 
     // # ---------------------------------- #
@@ -252,6 +261,7 @@ class FindPlugin : Plugin
         var walkerReader = FastWalker.Walk<StackFileInfo>(
             State.Root,
             (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
+            State.Counters,
             walkerOptions,
             ct
         );
@@ -332,9 +342,17 @@ class FindPlugin : Plugin
     /// </summary>
     private void PrintFinalSummary()
     {
+        double elapsedSeconds = Math.Max(State.ScanTimer.Elapsed.TotalSeconds, 0.001);
+        double filesPerSecond = State.Counters.FilesProcessed / elapsedSeconds;
+
+        Console.WriteLine();
         ConsolePlus.WriteHr();
         ConsolePlus.Write($"[Cyan]*[/] Ricerca conclusa");
-        ConsolePlus.Write($"[Cyan]*[/] Elementi trovati: [Cyan]{State.MatchCount}[/]");
+        ConsolePlus.Write($"[Cyan]*[/] Files processati: [Cyan]{State.Counters.FilesProcessed:N0}[/]");
+        ConsolePlus.Write($"[Cyan]*[/] Cartelle processate: [Cyan]{State.Counters.DirsProcessed:N0}[/]");
+        ConsolePlus.Write($"[Cyan]*[/] Throughput: [DarkGray]{filesPerSecond:N0} file/s[/]");
+        ConsolePlus.Write($"[Cyan]-[/]");
+        ConsolePlus.Write($"[Cyan]*[/] Match: [Green]{State.MatchCount:N0}[/]");
         ConsolePlus.WriteHr();
     }
 

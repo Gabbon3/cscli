@@ -5,9 +5,49 @@ namespace lib.io
 {
     public delegate T TransformFileSystemEntry<T>(ref FileSystemEntry entry);
 
+    public sealed class FastWalkerCounters
+    {
+        private long _filesProcessed;
+        private long _dirsProcessed;
+
+        public long FilesProcessed => Interlocked.Read(ref _filesProcessed);
+        public long DirsProcessed => Interlocked.Read(ref _dirsProcessed);
+
+        internal void Add(long files, long dirs)
+        {
+            Interlocked.Add(ref _filesProcessed, files);
+            Interlocked.Add(ref _dirsProcessed, dirs);
+        }
+    }
+
     public static class FastWalker
     {
         #region Walker
+        /// <summary>
+        /// Overload comodo di Walk quando non servono i contatori.
+        /// </summary>
+        public static ChannelReader<T> Walk<T>(
+            string rootPath,
+            TransformFileSystemEntry<T> transform,
+            FastWalkerOptions? options = null,
+            CancellationToken ct = default)
+        {
+            return WalkCore(rootPath, transform, null, options, ct);
+        }
+
+        /// <summary>
+        /// Overload di Walk quando si vuole tracciare i contatori in tempo reale.
+        /// </summary>
+        public static ChannelReader<T> Walk<T>(
+            string rootPath,
+            TransformFileSystemEntry<T> transform,
+            FastWalkerCounters counters,
+            FastWalkerOptions? options = null,
+            CancellationToken ct = default)
+        {
+            return WalkCore(rootPath, transform, counters, options, ct);
+        }
+
         /// <summary>
         /// Questo metodo cammina il file system in parallelo in maniera ricorsiva
         /// </summary>
@@ -15,11 +55,13 @@ namespace lib.io
         /// <param name="rootPath">percorso su cui iniziare il cammino</param>
         /// <param name="transform">metodo di trasformazione da FileSystemEntry a T (oggetto scelto per il channel in uscita)</param>
         /// <param name="options">opzioni di configurazione del FastWalker</param>
+        /// <param name="counters">struttura per tenere traccia dei file e delle cartelle processate</param>
         /// <param name="ct">token di cancellazione dell'operazione</param>
         /// <returns>channel dove verranno lanciati tutti i risultati trovati nel cammino</returns>
-        public static ChannelReader<T> Walk<T>(
+        private static ChannelReader<T> WalkCore<T>(
             string rootPath,
             TransformFileSystemEntry<T> transform,
+            FastWalkerCounters? counters,
             FastWalkerOptions? options = null,
             CancellationToken ct = default)
         {
@@ -73,6 +115,10 @@ namespace lib.io
             {
                 Task.Run(async () =>
                 {
+                    // Contatori locali (sullo stack del thread)
+                    long localFiles = 0;
+                    long localDirs = 0;
+
                     try
                     {
                         // pesco all'infinito finche il canale non viene chiuso
@@ -90,6 +136,8 @@ namespace lib.io
                                     {
                                         if (entry.IsDirectory)
                                         {
+                                            localDirs++;
+
                                             if (options.RecurseSubdirectories)
                                             {
                                                 Interlocked.Increment(ref pendingWork);
@@ -112,6 +160,9 @@ namespace lib.io
 
                                             return true;
                                         }
+
+                                        localFiles++;
+
                                         // è un file quindi verifico solo se ci sono filtri
                                         if (options.Filter != null)
                                         {
@@ -145,6 +196,13 @@ namespace lib.io
                                 {
                                     dirChannel.Writer.TryComplete();
                                     outputChannel.Writer.TryComplete();
+                                }
+                                // scarico i contatori locali nel contatore condiviso (se richiesto)
+                                if (counters != null && (localFiles != 0 || localDirs != 0))
+                                {
+                                    counters.Add(localFiles, localDirs);
+                                    localFiles = 0;
+                                    localDirs = 0;
                                 }
                             }
                         }
@@ -237,7 +295,7 @@ namespace lib.io
             var localOptions = new EnumerationOptions
             {
                 IgnoreInaccessible = options.IgnoreInaccessible,
-                RecurseSubdirectories = false, 
+                RecurseSubdirectories = false,
                 BufferSize = options.BufferSize,
                 AttributesToSkip = options.AttributesToSkip,
                 MatchCasing = options.MatchCasing,
@@ -286,15 +344,15 @@ namespace lib.io
                                                     Interlocked.Decrement(ref pendingWork);
                                                 }
                                             }
-                                            
+
                                             // Se le cartelle vanno contate e passano il filtro
                                             if (options.ReturnDirectoriesInOutput && (options.Filter == null || options.Filter(ref entry)))
                                             {
                                                 localDirs++;
                                             }
-                                            
+
                                             // restituisco SEMPRE false poichè non è necessario calcolare altro
-                                            return false; 
+                                            return false;
                                         }
 
                                         // 2. Gestione File
