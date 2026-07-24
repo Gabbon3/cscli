@@ -140,12 +140,12 @@ namespace plugins.regexgrep
             TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
             // ---
             if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
-            ConsolePlus.WriteBoxHeader($"Ricerca completata", 40);
+            ConsolePlus.WriteBoxHeader($"Ricerca completata", 40, ConsoleColor.Green);
             ConsolePlus.WriteList([
-                $"Match totali: [Green]{Telemetry.TotalMatchCount:N0}[/]",
-                $"File totali trovati: [DarkGray]{Telemetry.TotalFileFounded:N0}[/]",
+                $"Match totali: [Cyan]{Telemetry.TotalMatchCount:N0}[/]",
+                $"File totali trovati: [Yellow]{Telemetry.TotalFileFounded:N0}[/]",
                 $"File totali processati: [Magenta]{Telemetry.TotalFileProcessed:N0}[/]",
-                $"Spazio totale controllato: [Blue]{Formatter.Bytes(Telemetry.TotalSizeVisited)}[/]",
+                $"Spazio totale controllato: [DarkGray]{Formatter.Bytes(Telemetry.TotalSizeVisited)}[/]",
                 $"Throughput: [Cyan]{Formatter.Throughput(Telemetry.TotalSizeVisited, elapsed.TotalSeconds)}[/]",
                 $"Scritture Channel: [DarkGray]sync {Telemetry.ChannelWriteSync} - async {Telemetry.ChannelWriteAsync}[/]"
             ]);
