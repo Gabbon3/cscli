@@ -47,7 +47,25 @@ public static class ConsolePlus
 
         for (int i = 0; i < length; i++)
         {
-            if (span[i] != '[') continue;
+            char c = span[i];
+
+            if (c == '\n')
+            {
+                // se la stringa passata ha gia \r\n, escludo il \r per non stampare \r\r\n
+                int chunkEnd = (i > lastPos && span[i - 1] == '\r') ? i - 1 : i;
+
+                if (chunkEnd > lastPos)
+                {
+                    Console.Out.Write(span[lastPos..chunkEnd]);
+                }
+
+                // scrivo a console il newline nativo dell'OS (risolvendo il problema degli a capo a scala su vecchi server)
+                Console.Out.Write(Environment.NewLine);
+                lastPos = i + 1;
+                continue;
+            }
+
+            if (c != '[') continue;
 
             // Stampa il testo accumulato finora
             if (i > lastPos)
