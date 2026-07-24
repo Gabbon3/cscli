@@ -346,14 +346,14 @@ class FindPlugin : Plugin
         double filesPerSecond = State.Counters.FilesProcessed / elapsedSeconds;
 
         Console.WriteLine();
-        ConsolePlus.WriteHr();
-        ConsolePlus.Write($"[Cyan]*[/] Ricerca conclusa");
-        ConsolePlus.Write($"[Cyan]*[/] Files processati: [Cyan]{State.Counters.FilesProcessed:N0}[/]");
-        ConsolePlus.Write($"[Cyan]*[/] Cartelle processate: [Cyan]{State.Counters.DirsProcessed:N0}[/]");
-        ConsolePlus.Write($"[Cyan]*[/] Throughput: [DarkGray]{filesPerSecond:N0} file/s[/]");
-        ConsolePlus.Write($"[Cyan]-[/]");
-        ConsolePlus.Write($"[Cyan]*[/] Match: [Green]{State.MatchCount:N0}[/]");
-        ConsolePlus.WriteHr();
+        ConsolePlus.WriteBoxHeader($"Ricerca completata", 40);
+        ConsolePlus.WriteList([
+            $"Match totali: [Green]{State.MatchCount:N0}[/]",
+            $"File processati: [DarkGray]{State.Counters.FilesProcessed:N0}[/]",
+            $"Cartelle processate: [DarkGray]{State.Counters.DirsProcessed:N0}[/]",
+            $"Throughput: [Cyan]{filesPerSecond:N0} file/s[/]"
+        ]);
+        ConsolePlus.WriteHr(40);
     }
 
     // # ---------------------------------- #
