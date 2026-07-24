@@ -104,8 +104,7 @@ namespace plugins.eliminator
             await producerTask;
 
             // pulizia finale
-            ConsolePlus.Write($"[Green]#[/] Pulizia finale...");
-            Cleanup();
+            Cleanup(settings);
 
             // 6. stampa statistiche finali
             PrintFinalStatistics();
@@ -462,8 +461,15 @@ namespace plugins.eliminator
         /// <summary>
         /// Elimina le cartelle presenti sullo stack e se richiesto anche la cartella sorgente
         /// </summary>
-        private void Cleanup()
+        private void Cleanup(EliminatorSettings settings)
         {
+            // 0. Se non è richiesta la pulizia delle cartelle skippo
+            if (settings.DropDirs == false)
+            {
+                State.DirectoryToRemove!.Dispose();
+                return;
+            }
+            ConsolePlus.Write($"[Green]#[/] Pulizia finale...");
             // 1. pulizia ricorsiva dell'albero
             try
             {

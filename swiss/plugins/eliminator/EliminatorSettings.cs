@@ -17,6 +17,9 @@ namespace plugins.eliminator
         [Option("drop-source|ds", "Cancella al termine anche la cartella target", "Comando")]
         public bool DropSource { get; set; } = false;
 
+        [Option("drop-dirs|dd", "Cancella al termine anche tutte le cartelle vuote", "Comando")]
+        public bool DropDirs { get; set; } = false;
+
         [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc, "Comando")]
         public bool Silence { get; set; } = false;
 
