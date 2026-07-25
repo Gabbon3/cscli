@@ -39,6 +39,9 @@ namespace plugins.find
         [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc, "Configurazione")]
         public bool Silence { get; set; } = false;
 
+        [Option(CliMeta.ThreadsFlag, "Numero di thread usati nella ricerca (1 se sei su HDD)", "Configurazione")]
+        public int Threads { get; set; } = Environment.ProcessorCount;
+
         // --- OPZIONI CLASSIFICA ---
         [Option("biggest|B", "Restituisce i file più grandi", "Classifica")]
         public bool Biggest { get; set; }

@@ -158,6 +158,11 @@ class FindPlugin : Plugin
 
         // ---
 
+        if (settings.Threads < 1 || settings.Threads > 128) {
+            PrintError($"Il numero di threads inserito non è valido: {settings.Threads}");
+            return false;
+        }
+
         return true;
     }
 
@@ -247,7 +252,8 @@ class FindPlugin : Plugin
             Filter = State.FileFilter,
             BufferSize = 64 * 1024,
             SingleReader = true,
-            ReturnDirectoriesInOutput = settings.Dirs
+            ReturnDirectoriesInOutput = settings.Dirs,
+            MaxDegreeOfParallelism = settings.Threads
         };
     }
 
