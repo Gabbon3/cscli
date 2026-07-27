@@ -29,9 +29,6 @@ namespace plugins.eliminator
         [Option("threads|t", "Specifica il numero massimo di thread (default: numero di core della CPU)", "Comando")]
         public int? Threads { get; set; }
 
-        [Option("force|f", "Forza l'operazione senza chiedere conferma", "Comando")]
-        public bool Force { get; set; }
-
         // --- opzioni di filtraggio ---
 
         [Option("pattern|p", "Filtra i file in base a un'espressione regolare sul nome", "Filtri")]

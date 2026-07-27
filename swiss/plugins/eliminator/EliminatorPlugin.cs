@@ -31,7 +31,12 @@ namespace plugins.eliminator
         private class EliminationState
         {
             public string TargetPath { get; set; } = "";
+
+            // PER DEBUG
             public bool IsDebug { get; set; }
+            public long DroppedFilesCountDebug { get; set; } = 0;
+            public long BytesSavedDebug { get; set; } = 0;
+            // ---
             public bool IsRecursive { get; set; }
             public FileAttributes AttributesToSkip { get; set; }
             public bool DropInstant { get; set; }
@@ -74,31 +79,40 @@ namespace plugins.eliminator
                 ConsolePlus.Write(State.FileFilterOptions.ToString());
             }
             ConsolePlus.Write($"\n[Red]# Confermi di voler procedere?[/]");
-            if (!settings.Force)
+            // gestione della conferma tramite console interattiva o meno
+            bool isInteractive = AnsiConsole.Profile.Capabilities.Interactive
+                     && !Console.IsInputRedirected
+                     && !Console.IsOutputRedirected;
+
+            bool confermato = false;
+
+            if (isInteractive)
             {
-                try
-                {
-                    string confirm = AnsiConsole.Prompt(
+                // AMBIENTE LOCALE / GUI COMPLETA: SelectionPrompt di Spectre
+                string confirm = AnsiConsole.Prompt(
                     new SelectionPrompt<string>()
-                    .PageSize(3)
-                    .AddChoices(["No", "Si"]));
-                    // controllo
-                    if (string.IsNullOrEmpty(confirm) || confirm != "Si")
-                    {
-                        ConsolePlus.Write($"[Green]#[/] Operazione annullata.");
-                        return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    PrintError($"Errore durante la conferma: {ex.Message}");
-                    PrintWarning("Se ti trovi su un terminale remoto prova a usare l'opzione --force|-f per bypassare la conferma.");
-                    return;
-                }
+                        .Title("[bold red]Sei sicuro di voler procedere con l'eliminazione?[/]")
+                        .PageSize(3)
+                        .AddChoices(["No", "Si"])
+                );
+
+                confermato = (confirm == "Si");
             }
             else
             {
-                PrintWarning($"Conferma bypassata con --force|-f.");
+                // AMBIENTE REMOTO (WinRM / Enter-PSSession / Pipe)
+                // Fallback su prompt di testo semplice compatibile con Console.ReadLine()
+                AnsiConsole.Markup("[bold yellow]ATTENZIONE:[/] Confermi l'eliminazione dei file? [s/N]: ");
+
+                string? confirm = Console.ReadLine()?.Trim().ToLower();
+                confermato = !string.IsNullOrWhiteSpace(confirm) && (confirm == "s" || confirm == "si" || confirm == "yes");
+            }
+
+            // Controllo finale
+            if (!confermato)
+            {
+                ConsolePlus.Write("[Green]#[/] Operazione annullata dall'utente.");
+                return;
             }
 
             ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(State.IsDebug ? "(DEBUG)" : "")}");
@@ -263,7 +277,8 @@ namespace plugins.eliminator
                         ct.ThrowIfCancellationRequested();
                         if (State.IsDebug)
                         {
-                            ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
+                            State.DroppedFilesCountDebug++;
+                            State.BytesSavedDebug += item.Length;
                             item.Dispose(); // in debug restituisco subito all'arraypool
                         }
                         else
@@ -366,7 +381,30 @@ namespace plugins.eliminator
         {
             return Task.Run(async () =>
             {
-                if (State.IsDebug) return;
+                if (State.IsDebug)
+                {
+                    // Modalità DEBUG: schermata semplice con DroppedFilesCountDebug e BytesSavedDebug
+                    try
+                    {
+                        await AnsiConsole.Live(new Text(""))
+                            .Cropping(VerticalOverflowCropping.Bottom)
+                            .StartAsync(async ctx =>
+                            {
+                                while (State.IsProcessing && !ct.IsCancellationRequested)
+                                {
+                                    var debugGrid = new Grid().AddColumn(new GridColumn().NoWrap());
+                                    debugGrid.AddEmptyRow();
+                                    debugGrid.AddRow($"[yellow]File da Eliminare[/]: [cyan]{State.DroppedFilesCountDebug:N0}[/]");
+                                    debugGrid.AddRow($"[yellow]Spazio Salvato[/]   : [magenta]{Formatter.Bytes(State.BytesSavedDebug)}[/]");
+
+                                    ctx.UpdateTarget(debugGrid);
+                                    await Task.Delay(250, ct);
+                                }
+                            });
+                    }
+                    catch (TaskCanceledException) { }
+                    return;
+                }
 
                 long lastTotalDropped = 0;
                 long lastTotalBytesSaved = 0;
