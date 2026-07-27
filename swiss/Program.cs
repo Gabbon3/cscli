@@ -8,7 +8,6 @@ using plugins.tree;
 using plugins.eliminator;
 using plugins.count;
 using plugins.mdconverter;
-using plugins.cripto;
 using plugins.regexgrep;
 using plugins.move;
 // # ----------------------- #
@@ -19,8 +18,8 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.1.1";
-const string versionDescription = "Find ottimizzato";
+const string version = "2.1.2";
+const string versionDescription = "Supporto per filtri temporali estesi";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -38,7 +37,6 @@ List<PluginRegistration> plugins = [
     new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin()),
     new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
     new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
-    new("cripto", "Effettua la crittografia su file o cartelle legata all'utente Windows", () => new CriptoPlugin()),
     new("grep", "Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)", () => new RegexGrepPlugin()),
     new("move", "Tool multithreaded per lo spostamento di file e cartelle", () => new MovePlugin()),
 ];

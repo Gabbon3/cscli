@@ -330,9 +330,8 @@ namespace plugins.regexgrep
                 // forzo il glob per semplicita
                 Pattern: settings.PatternFileFilter,
                 MatchType: FilterFileNameMatchType.Regex,
-                // Filtri sulle date file (modifica)
-                ModifiedBefore: settings.OlderThan,
-                ModifiedAfter: settings.Since
+                DateBefore: settings.DateBefore,
+                DateAfter: settings.DateAfter
             );
 
             FileSystemFilter? fileFilter = FileFilterFactory.CreateFilter(filterOpts);

@@ -1,3 +1,5 @@
+using lib.io;
+
 namespace plugins.eliminator
 {
     public class EliminatorSettings
@@ -29,6 +31,9 @@ namespace plugins.eliminator
         [Option("threads|t", "Specifica il numero massimo di thread (default: numero di core della CPU)", "Comando")]
         public int? Threads { get; set; }
 
+        [Option("force|f", "Forza l'operazione senza chiedere conferma", "Comando")]
+        public bool Force { get; set; } = false;
+
         // --- opzioni di filtraggio ---
 
         [Option("pattern|p", "Filtra i file in base a un'espressione regolare sul nome", "Filtri")]
@@ -44,10 +49,10 @@ namespace plugins.eliminator
         public bool IncludeHidden { get; set; } = false;
         
 
-        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
-        public DateTime? Since { get; set; }
+        [Option(CliMeta.DateAfterFlag, CliMeta.DateAfterDesc, "Filtri")]
+        public RelativeDateTime? DateAfter { get; set; }
 
-        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
-        public DateTime? OlderThan { get; set; }
+        [Option(CliMeta.DateBeforeFlag, CliMeta.DateBeforeDesc, "Filtri")]
+        public RelativeDateTime? DateBefore { get; set; }
     }
 }

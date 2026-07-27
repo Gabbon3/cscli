@@ -1,3 +1,5 @@
+using lib.io;
+
 namespace plugins.count
 {
     public class CountSettings
@@ -26,10 +28,10 @@ namespace plugins.count
         [Option(CliMeta.FilePatternFlag, CliMeta.FilePatternDesc, "Filtri")]
         public string? Pattern { get; set; }
 
-        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
-        public DateTime? Since { get; set; }
+        [Option(CliMeta.DateAfterFlag, CliMeta.DateAfterDesc, "Filtri")]
+        public RelativeDateTime? DateAfter { get; set; }
 
-        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
-        public DateTime? OlderThan { get; set; }
+        [Option(CliMeta.DateBeforeFlag, CliMeta.DateBeforeDesc, "Filtri")]
+        public RelativeDateTime? DateBefore { get; set; }
     }
 }

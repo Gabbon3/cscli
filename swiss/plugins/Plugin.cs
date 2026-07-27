@@ -1,15 +1,24 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Reflection;
 using lib.console;
+using lib.io;
 using Spectre.Console;
 
 namespace plugins;
 
 public abstract class Plugin
 {
+    #region Metadata
+
     public abstract string Name { get; }
     public abstract string Description { get; }
     public abstract Task RunAsync(string[] args, CancellationToken ct);
+
+    #endregion
+
+    #region Parsing
+
     /// <summary>
     /// Parsa automaticamente gli args e restituisce l'oggetto Settings popolato
     /// </summary>
@@ -83,6 +92,10 @@ public abstract class Plugin
         return settings;
     }
 
+    #endregion
+
+    #region Input Helpers
+
     /// <summary>
     /// Fa il parsing dell'input path preso dalla CLI e controlla se esiste su richiesta
     /// </summary>
@@ -120,6 +133,10 @@ public abstract class Plugin
         return pattern;
     }
 
+    #endregion
+
+    #region Value Assignment
+
     /// <summary>
     /// Helper per convertire le stringhe nei tipi giusti (int, string, bool, ecc.)
     /// </summary>
@@ -140,6 +157,14 @@ public abstract class Plugin
         // bool
         else if (targetType == typeof(bool) && bool.TryParse(value, out bool boolVal))
             prop.SetValue(obj, boolVal);
+        // relative datetime (con campo temporale m/c/a)
+        else if (targetType == typeof(RelativeDateTime))
+        {
+            if (TryParseRelativeDate(value, out RelativeDateTime relativeDateTime))
+            {
+                prop.SetValue(obj, relativeDateTime);
+            }
+        }
         // datetime
         else if (targetType == typeof(DateTime))
         {
@@ -151,7 +176,7 @@ public abstract class Plugin
             // fallback parsing standard ("2024-10-25")
             else if (DateTime.TryParse(value, out DateTime standardDate))
             {
-                prop.SetValue(obj, standardDate);
+                prop.SetValue(obj, NormalizeToUtc(standardDate));
             }
         }
         // double
@@ -159,6 +184,10 @@ public abstract class Plugin
             prop.SetValue(obj, doubleVal);
         // TODO: aggiungere supporto per altri tipi
     }
+
+    #endregion
+
+    #region Date Parsing
 
     /// <summary>
     /// Calcola la data relativa passando stringhe come "12d", "5h" o solo "12" (default giorni).
@@ -188,14 +217,14 @@ public abstract class Plugin
             amountStr = value[..^1];
         }
 
-        if (double.TryParse(amountStr, out double amount))
+        if (double.TryParse(amountStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double amount))
         {
             result = unit switch
             {
-                'd' => DateTime.Now.AddDays(-amount),
-                'h' => DateTime.Now.AddHours(-amount),
-                'm' => DateTime.Now.AddMinutes(-amount),
-                's' => DateTime.Now.AddSeconds(-amount),
+                'd' => DateTime.UtcNow.AddDays(-amount),
+                'h' => DateTime.UtcNow.AddHours(-amount),
+                'm' => DateTime.UtcNow.AddMinutes(-amount),
+                's' => DateTime.UtcNow.AddSeconds(-amount),
                 _ => default
             };
 
@@ -206,10 +235,83 @@ public abstract class Plugin
     }
 
     /// <summary>
+    /// Calcola una data relativa/assoluta con selettore campo opzionale in coda:
+    /// - 60d (default modifica)
+    /// - 60d:c (creazione)
+    /// - 12h:a (accesso)
+    /// - 2024-01-15:m (modifica)
+    /// </summary>
+    private static bool TryParseRelativeDate(string value, out RelativeDateTime result)
+    {
+        result = default;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        string raw = value.Trim();
+        RelativeDateTimeField field = RelativeDateTimeField.Modified;
+        string temporalToken = raw;
+
+        int separatorIndex = raw.LastIndexOf(':');
+        if (separatorIndex > 0 && separatorIndex == raw.Length - 2)
+        {
+            char fieldToken = char.ToLowerInvariant(raw[^1]);
+            if (TryParseDateField(fieldToken, out RelativeDateTimeField parsedField))
+            {
+                field = parsedField;
+                temporalToken = raw[..separatorIndex];
+            }
+        }
+
+        if (TryParseRelativeDate(temporalToken, out DateTime relativeUtc))
+        {
+            result = new RelativeDateTime(field, relativeUtc);
+            return true;
+        }
+
+        if (DateTime.TryParse(temporalToken, out DateTime absoluteDate))
+        {
+            result = new RelativeDateTime(field, NormalizeToUtc(absoluteDate));
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseDateField(char token, out RelativeDateTimeField field)
+    {
+        field = token switch
+        {
+            'm' => RelativeDateTimeField.Modified,
+            'c' => RelativeDateTimeField.Created,
+            'a' => RelativeDateTimeField.Accessed,
+            _ => default
+        };
+
+        return token is 'm' or 'c' or 'a';
+    }
+
+    private static DateTime NormalizeToUtc(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Utc)
+            return value;
+
+        if (value.Kind == DateTimeKind.Local)
+            return value.ToUniversalTime();
+
+        return DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
+    }
+
+    #endregion
+
+    #region Help
+
+    /// <summary>
     /// Stampa dell'Help standardizzata basata sulla struttura dei settings usando ConsolePlus
     /// </summary>
     public void PrintHelp<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] TSettings>(bool printEndLine = true)
     {
+        const int maxLineWidth = 92;
         var properties = typeof(TSettings).GetProperties();
 
         // 1. Estrai e ordina gli argomenti Fixed
@@ -261,7 +363,13 @@ public abstract class Plugin
             foreach (var fa in fixedArgs)
             {
                 string left = $"<{fa.Attr!.Name}>".PadRight(padding);
-                ConsolePlus.Write($"  [White]{left}[/][DarkGray]{fa.Attr.Description ?? ""}[/]");
+                WriteHelpDescriptionLine(
+                    leftPart: left,
+                    description: fa.Attr.Description ?? "",
+                    indent: "  ",
+                    leftColor: "White",
+                    maxLineWidth: maxLineWidth
+                );
             }
             ConsolePlus.Write("");
         }
@@ -295,7 +403,13 @@ public abstract class Plugin
                 string indent = string.IsNullOrEmpty(category) ? "  " : "    ";
 
                 string left = flags.PadRight(padding);
-                ConsolePlus.Write($"{indent}[Green]{left}[/][DarkGray]{opt.Attr.Description ?? ""}[/]");
+                WriteHelpDescriptionLine(
+                    leftPart: left,
+                    description: opt.Attr.Description ?? "",
+                    indent: indent,
+                    leftColor: "Green",
+                    maxLineWidth: maxLineWidth
+                );
             }
         }
 
@@ -305,6 +419,77 @@ public abstract class Plugin
             ConsolePlus.WriteHr(80);
         }
     }
+
+    private static void WriteHelpDescriptionLine(string leftPart, string description, string indent, string leftColor, int maxLineWidth)
+    {
+        int availableDescriptionWidth = Math.Max(20, maxLineWidth - (indent.Length + leftPart.Length));
+
+        var wrappedLines = WrapText(description, availableDescriptionWidth);
+        if (wrappedLines.Count == 0)
+        {
+            ConsolePlus.Write($"{indent}[{leftColor}]{leftPart}[/]");
+            return;
+        }
+
+        ConsolePlus.Write($"{indent}[{leftColor}]{leftPart}[/][DarkGray]{wrappedLines[0]}[/]");
+
+        string continuationIndent = new string(' ', indent.Length + leftPart.Length);
+        for (int i = 1; i < wrappedLines.Count; i++)
+        {
+            ConsolePlus.Write($"{continuationIndent}[DarkGray]{wrappedLines[i]}[/]");
+        }
+    }
+
+    private static List<string> WrapText(string text, int maxCharsPerLine)
+    {
+        var lines = new List<string>();
+        if (string.IsNullOrWhiteSpace(text)) return lines;
+
+        string[] words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return lines;
+
+        string currentLine = words[0];
+        for (int i = 1; i < words.Length; i++)
+        {
+            string candidate = currentLine + " " + words[i];
+            if (candidate.Length <= maxCharsPerLine)
+            {
+                currentLine = candidate;
+                continue;
+            }
+
+            lines.Add(currentLine);
+
+            // Spezza parole molto lunghe in chunk fissi.
+            if (words[i].Length > maxCharsPerLine)
+            {
+                int start = 0;
+                while (start < words[i].Length)
+                {
+                    int len = Math.Min(maxCharsPerLine, words[i].Length - start);
+                    lines.Add(words[i].Substring(start, len));
+                    start += len;
+                }
+
+                currentLine = string.Empty;
+                continue;
+            }
+
+            currentLine = words[i];
+        }
+
+        if (!string.IsNullOrEmpty(currentLine))
+        {
+            lines.Add(currentLine);
+        }
+
+        return lines;
+    }
+
+    #endregion
+
+    #region Diagnostics
+
     public virtual void Help()
     {
         PrintWarning("Nessun help definito");
@@ -315,18 +500,16 @@ public abstract class Plugin
     {
         lock (_printErrorLock)
         {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"[ ! ] {Name}: {message}");
-            Console.ResetColor();
+            ConsolePlus.Write($"[Yellow][ ! ] {Name}: {message}[/]");
         }
     }
     public void PrintError(string message)
     {
         lock (_printErrorLock)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"[!!!] {Name}: {message}");
-            Console.ResetColor();
+            ConsolePlus.Write($"[Red][!!!] {Name}: {message}[/]");
         }
     }
+
+    #endregion
 }

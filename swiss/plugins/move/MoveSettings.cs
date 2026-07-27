@@ -1,3 +1,5 @@
+using lib.io;
+
 namespace plugins.move
 {
     public class MoveSettings
@@ -41,10 +43,10 @@ namespace plugins.move
         [Option("pattern|p", "Filtra i file in base a un'espressione regolare sul nome", "Filtri")]
         public string? Pattern { get; set; }
 
-        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
-        public DateTime? Since { get; set; } 
+        [Option(CliMeta.DateAfterFlag, CliMeta.DateAfterDesc, "Filtri")]
+        public RelativeDateTime? DateAfter { get; set; }
 
-        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
-        public DateTime? OlderThan { get; set; }
+        [Option(CliMeta.DateBeforeFlag, CliMeta.DateBeforeDesc, "Filtri")]
+        public RelativeDateTime? DateBefore { get; set; }
     }
 }

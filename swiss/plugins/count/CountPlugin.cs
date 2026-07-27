@@ -40,8 +40,8 @@ namespace plugins.count
                 Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
-                ModifiedBefore: settings.OlderThan,
-                ModifiedAfter: settings.Since
+                DateBefore: settings.DateBefore,
+                DateAfter: settings.DateAfter
             );
 
             FileSystemFilter? fileFilter;

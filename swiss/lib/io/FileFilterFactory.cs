@@ -19,15 +19,8 @@ namespace lib.io
             string? Pattern = null,
             FilterFileNameMatchType MatchType = FilterFileNameMatchType.Regex, // default regex per semplicita
             bool IgnoreCase = true,
-            // modifica
-            DateTime? ModifiedAfter = null,
-            DateTime? ModifiedBefore = null,
-            // creazione
-            DateTime? CreatedAfter = null,
-            DateTime? CreatedBefore = null,
-            // accesso
-            DateTime? AccessedAfter = null,
-            DateTime? AccessedBefore = null
+            RelativeDateTime? DateAfter = null,
+            RelativeDateTime? DateBefore = null
         )
         {
             /// <summary>
@@ -51,17 +44,17 @@ namespace lib.io
                     sb.AppendLine($"[Cyan]*[/] Nome file: Corrispondenza {matchStr} con '{Pattern}' {caseStr}");
                 }
 
-                // Date di Creazione
-                if (CreatedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Piu recente [DarkGray](data creazione)[/]: {CreatedAfter.Value:dd.MM.yyyy HH:ss}");
-                if (CreatedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data creazione)[/]: {CreatedBefore.Value:dd.MM.yyyy HH:ss}");
+                if (DateAfter.HasValue)
+                {
+                    var date = DateAfter.Value;
+                    sb.AppendLine($"[Cyan]*[/] Piu recente [DarkGray](data {FieldDescription(date.Field)})[/]: {date.ValueUtc:dd.MM.yyyy HH:mm} UTC");
+                }
 
-                // Date di Modifica
-                if (ModifiedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Piu recente [DarkGray](data modifica)[/]: {ModifiedAfter.Value:dd.MM.yyyy HH:ss}");
-                if (ModifiedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data modifica)[/]: {ModifiedBefore.Value:dd.MM.yyyy HH:ss}");
-
-                // Date di Accesso
-                if (AccessedAfter.HasValue) sb.AppendLine($"[Cyan]*[/] Piu recente [DarkGray](data ultimo accesso)[/]: {AccessedAfter.Value:dd.MM.yyyy HH:ss}");
-                if (AccessedBefore.HasValue) sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data ultimo accesso)[/]: {AccessedBefore.Value:dd.MM.yyyy HH:ss}");
+                if (DateBefore.HasValue)
+                {
+                    var date = DateBefore.Value;
+                    sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data {FieldDescription(date.Field)})[/]: {date.ValueUtc:dd.MM.yyyy HH:mm} UTC");
+                }
 
                 if (sb.Length == 0)
                 {
@@ -80,6 +73,16 @@ namespace lib.io
             return (ref FileSystemEntry entry) => a(ref entry) && b(ref entry);
         }
 
+        private static string FieldDescription(RelativeDateTimeField field)
+        {
+            return field switch
+            {
+                RelativeDateTimeField.Created => "creazione",
+                RelativeDateTimeField.Accessed => "ultimo accesso",
+                _ => "modifica"
+            };
+        }
+
         /// <summary>
         /// Genera il delegate ad alte prestazioni per il filtraggio dei file
         /// </summary>
@@ -95,39 +98,27 @@ namespace lib.io
                 else
                     finalFilter = Combine(finalFilter, newFilter);
             }
+
+            static DateTime SelectDateUtc(ref FileSystemEntry entry, RelativeDateTimeField field)
+            {
+                return field switch
+                {
+                    RelativeDateTimeField.Created => entry.CreationTimeUtc.UtcDateTime,
+                    RelativeDateTimeField.Accessed => entry.LastAccessTimeUtc.UtcDateTime,
+                    _ => entry.LastWriteTimeUtc.UtcDateTime
+                };
+            }
+
             // --- FILTRI SULLE DATE ---
-            // creazione
-            if (options.CreatedAfter.HasValue)
+            if (options.DateAfter.HasValue)
             {
-                var date = options.CreatedAfter.Value;
-                AddFilter((ref FileSystemEntry entry) => entry.CreationTimeUtc >= date);
+                var date = options.DateAfter.Value;
+                AddFilter((ref FileSystemEntry entry) => SelectDateUtc(ref entry, date.Field) >= date.ValueUtc);
             }
-            if (options.CreatedBefore.HasValue)
+            if (options.DateBefore.HasValue)
             {
-                var date = options.CreatedBefore.Value;
-                AddFilter((ref FileSystemEntry entry) => entry.CreationTimeUtc <= date);
-            }
-            // modifica
-            if (options.ModifiedAfter.HasValue)
-            {
-                var date = options.ModifiedAfter.Value;
-                AddFilter((ref FileSystemEntry entry) => entry.LastWriteTimeUtc >= date);
-            }
-            if (options.ModifiedBefore.HasValue)
-            {
-                var date = options.ModifiedBefore.Value;
-                AddFilter((ref FileSystemEntry entry) => entry.LastWriteTimeUtc <= date);
-            }
-            // accesso
-            if (options.AccessedAfter.HasValue)
-            {
-                var date = options.AccessedAfter.Value;
-                AddFilter((ref FileSystemEntry entry) => entry.LastAccessTimeUtc >= date);
-            }
-            if (options.AccessedBefore.HasValue)
-            {
-                var date = options.AccessedBefore.Value;
-                AddFilter((ref FileSystemEntry entry) => entry.LastAccessTimeUtc <= date);
+                var date = options.DateBefore.Value;
+                AddFilter((ref FileSystemEntry entry) => SelectDateUtc(ref entry, date.Field) <= date.ValueUtc);
             }
             // --- FILTRO SUL NOME (regex o indexof semplice) ---
             if (!string.IsNullOrEmpty(options.Pattern))

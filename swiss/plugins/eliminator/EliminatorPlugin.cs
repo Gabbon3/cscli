@@ -32,11 +32,8 @@ namespace plugins.eliminator
         {
             public string TargetPath { get; set; } = "";
 
-            // PER DEBUG
             public bool IsDebug { get; set; }
-            public long DroppedFilesCountDebug { get; set; } = 0;
-            public long BytesSavedDebug { get; set; } = 0;
-            // ---
+            public EliminationStateDebug DebugInfo { get; set; } = new();
             public bool IsRecursive { get; set; }
             public FileAttributes AttributesToSkip { get; set; }
             public bool DropInstant { get; set; }
@@ -50,6 +47,14 @@ namespace plugins.eliminator
             public long[] BytesSavedList { get; set; } = [];
             public bool IsProcessing { get; set; } = true;
             public bool DropTargetPathAtEnd { get; set; } = false;
+        }
+
+        private class EliminationStateDebug
+        {
+            public long DroppedFilesCount { get; set; }
+            public long BytesSaved { get; set; }
+            public DateTime? OldestFileDate { get; set; }
+            public DateTime? NewestFileDate { get; set; }
         }
 
         #region RunAsync
@@ -79,40 +84,31 @@ namespace plugins.eliminator
                 ConsolePlus.Write(State.FileFilterOptions.ToString());
             }
             ConsolePlus.Write($"\n[Red]# Confermi di voler procedere?[/]");
-            // gestione della conferma tramite console interattiva o meno
-            bool isInteractive = AnsiConsole.Profile.Capabilities.Interactive
-                     && !Console.IsInputRedirected
-                     && !Console.IsOutputRedirected;
-
-            bool confermato = false;
-
-            if (isInteractive)
+            if (!settings.Force)
             {
-                // AMBIENTE LOCALE / GUI COMPLETA: SelectionPrompt di Spectre
-                string confirm = AnsiConsole.Prompt(
+                try
+                {
+                    string confirm = AnsiConsole.Prompt(
                     new SelectionPrompt<string>()
-                        .Title("[bold red]Sei sicuro di voler procedere con l'eliminazione?[/]")
-                        .PageSize(3)
-                        .AddChoices(["No", "Si"])
-                );
-
-                confermato = (confirm == "Si");
+                    .PageSize(3)
+                    .AddChoices(["No", "Si"]));
+                    // controllo
+                    if (string.IsNullOrEmpty(confirm) || confirm != "Si")
+                    {
+                        ConsolePlus.Write($"[Green]#[/] Operazione annullata.");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    PrintError($"Errore durante la conferma: {ex.Message}");
+                    PrintWarning("Se ti trovi su un terminale remoto prova a usare l'opzione --force|-f per bypassare la conferma.");
+                    return;
+                }
             }
             else
             {
-                // AMBIENTE REMOTO (WinRM / Enter-PSSession / Pipe)
-                // Fallback su prompt di testo semplice compatibile con Console.ReadLine()
-                AnsiConsole.Markup("[bold yellow]ATTENZIONE:[/] Confermi l'eliminazione dei file? [s/N]: ");
-
-                string? confirm = Console.ReadLine()?.Trim().ToLower();
-                confermato = !string.IsNullOrWhiteSpace(confirm) && (confirm == "s" || confirm == "si" || confirm == "yes");
-            }
-
-            // Controllo finale
-            if (!confermato)
-            {
-                ConsolePlus.Write("[Green]#[/] Operazione annullata dall'utente.");
-                return;
+                PrintWarning($"Conferma bypassata con --force|-f.");
             }
 
             ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(State.IsDebug ? "(DEBUG)" : "")}");
@@ -168,8 +164,8 @@ namespace plugins.eliminator
                 Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
-                ModifiedBefore: settings.OlderThan,
-                ModifiedAfter: settings.Since
+                DateBefore: settings.DateBefore,
+                DateAfter: settings.DateAfter
             );
 
             State.FileFilter = FileFilterFactory.CreateFilter(State.FileFilterOptions);
@@ -277,8 +273,21 @@ namespace plugins.eliminator
                         ct.ThrowIfCancellationRequested();
                         if (State.IsDebug)
                         {
-                            State.DroppedFilesCountDebug++;
-                            State.BytesSavedDebug += item.Length;
+                            State.DebugInfo.DroppedFilesCount++;
+                            State.DebugInfo.BytesSaved += item.Length;
+
+                            DateTime fileDate = item.LastWriteTime;
+
+                            if (!State.DebugInfo.OldestFileDate.HasValue || fileDate < State.DebugInfo.OldestFileDate.Value)
+                            {
+                                State.DebugInfo.OldestFileDate = fileDate;
+                            }
+
+                            if (!State.DebugInfo.NewestFileDate.HasValue || fileDate > State.DebugInfo.NewestFileDate.Value)
+                            {
+                                State.DebugInfo.NewestFileDate = fileDate;
+                            }
+
                             item.Dispose(); // in debug restituisco subito all'arraypool
                         }
                         else
@@ -394,8 +403,10 @@ namespace plugins.eliminator
                                 {
                                     var debugGrid = new Grid().AddColumn(new GridColumn().NoWrap());
                                     debugGrid.AddEmptyRow();
-                                    debugGrid.AddRow($"[yellow]File da Eliminare[/]: [cyan]{State.DroppedFilesCountDebug:N0}[/]");
-                                    debugGrid.AddRow($"[yellow]Spazio Salvato[/]   : [magenta]{Formatter.Bytes(State.BytesSavedDebug)}[/]");
+                                    debugGrid.AddRow($"File da Eliminare        : [cyan]{State.DebugInfo.DroppedFilesCount:N0}[/]");
+                                    debugGrid.AddRow($"Spazio Salvato           : [magenta]{Formatter.Bytes(State.DebugInfo.BytesSaved)}[/]");
+                                    debugGrid.AddRow($"File piu vecchio         : [yellow]{State.DebugInfo.OldestFileDate:dd.MM.yyyy hh:mm}[/]");
+                                    debugGrid.AddRow($"File piu recente         : [yellow]{State.DebugInfo.NewestFileDate:dd.MM.yyyy hh:mm}[/]");
 
                                     ctx.UpdateTarget(debugGrid);
                                     await Task.Delay(250, ct);

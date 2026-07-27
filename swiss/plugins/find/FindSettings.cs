@@ -1,3 +1,5 @@
+using lib.io;
+
 namespace plugins.find
 {
     public class FindSettings
@@ -24,11 +26,11 @@ namespace plugins.find
         [Option("fixed|f", "Verifica se il pattern è contenuto nel nome (ignora regex)", "Configurazione")]
         public bool FixedMatch { get; set; }
 
-        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Configurazione")]
-        public DateTime? Since { get; set; }
+        [Option(CliMeta.DateAfterFlag, CliMeta.DateAfterDesc, "Configurazione")]
+        public RelativeDateTime? DateAfter { get; set; }
 
-        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Configurazione")]
-        public DateTime? OlderThan { get; set; }
+        [Option(CliMeta.DateBeforeFlag, CliMeta.DateBeforeDesc, "Configurazione")]
+        public RelativeDateTime? DateBefore { get; set; }
 
         [Option(CliMeta.JustEnoughOutputFlag, CliMeta.JustEnoughOutputDesc, "Configurazione")]
         public bool JustEnoughOutput { get; set; } = false;

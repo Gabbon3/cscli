@@ -1,3 +1,5 @@
+using lib.io;
+
 namespace plugins.regexgrep
 {
     public class RegexGrepSettings
@@ -50,11 +52,11 @@ namespace plugins.regexgrep
         [Option("pattern|p", "Cerca solo nei file che corrispondono al pattern regex", "Filtri")]
         public string? PatternFileFilter { get; set; }
 
-        [Option(CliMeta.SinceFlag, CliMeta.SinceDesc, "Filtri")]
-        public DateTime? Since { get; set; } 
+        [Option(CliMeta.DateAfterFlag, CliMeta.DateAfterDesc, "Filtri")]
+        public RelativeDateTime? DateAfter { get; set; }
 
-        [Option(CliMeta.OlderThanFlag, CliMeta.OlderThanDesc, "Filtri")]
-        public DateTime? OlderThan { get; set; }
+        [Option(CliMeta.DateBeforeFlag, CliMeta.DateBeforeDesc, "Filtri")]
+        public RelativeDateTime? DateBefore { get; set; }
 
         // output
 

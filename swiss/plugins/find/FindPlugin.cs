@@ -212,8 +212,8 @@ class FindPlugin : Plugin
             Pattern: State.Pattern,
             MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
             IgnoreCase: settings.IgnoreCase,
-            ModifiedBefore: settings.OlderThan,
-            ModifiedAfter: settings.Since
+            DateBefore: settings.DateBefore,
+            DateAfter: settings.DateAfter
         );
 
         try
