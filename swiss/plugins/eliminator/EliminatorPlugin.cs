@@ -74,15 +74,31 @@ namespace plugins.eliminator
                 ConsolePlus.Write(State.FileFilterOptions.ToString());
             }
             ConsolePlus.Write($"\n[Red]# Confermi di voler procedere?[/]");
-            string confirm = AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .PageSize(3)
-                .AddChoices(["No", "Si"]));
-            // controllo
-            if (string.IsNullOrEmpty(confirm) || confirm != "Si")
+            if (!settings.Force)
             {
-                ConsolePlus.Write($"[Green]#[/] Operazione annullata.");
-                return;
+                try
+                {
+                    string confirm = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                    .PageSize(3)
+                    .AddChoices(["No", "Si"]));
+                    // controllo
+                    if (string.IsNullOrEmpty(confirm) || confirm != "Si")
+                    {
+                        ConsolePlus.Write($"[Green]#[/] Operazione annullata.");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    PrintError($"Errore durante la conferma: {ex.Message}");
+                    PrintWarning("Se ti trovi su un terminale remoto prova a usare l'opzione --force|-f per bypassare la conferma.");
+                    return;
+                }
+            }
+            else
+            {
+                PrintWarning($"Conferma bypassata con --force|-f.");
             }
 
             ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(State.IsDebug ? "(DEBUG)" : "")}");
