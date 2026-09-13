@@ -66,6 +66,7 @@ class FindPlugin : Plugin
         public Func<StackFileInfo, long>? PrioritySelector;
         public FinderOptions Config = new();
         public FileSystemFilter? FileFilter;
+        public FileSystemFilter? DirectoryExcludeFilter;
     }
 
     private struct FinderOptions
@@ -103,7 +104,7 @@ class FindPlugin : Plugin
         // 3. configuro le opzioni per il ranking (se richiesto)
         ConfigureRankingMode(settings);
         // 4. costruisco il filtro per cercare i file (il motore vero del plugin)
-        if (!BuildFileFilter(settings)) return;
+        if (!BuildFilters(settings)) return;
         // 5. creo la configurazione del FastWalker
         var walkerOptions = CreateWalkerOptions(settings);
         // 6. avvio il processo principale, inizio la ricerca
@@ -204,10 +205,11 @@ class FindPlugin : Plugin
     #endregion
     #region File Filter
     /// <summary>
-    /// Crea il FileSystemFilter in base alle opzioni fornite.
+    /// Crea il FileSystemFilter in base alle opzioni fornite per file e cartelle da escludere
     /// </summary>
-    private bool BuildFileFilter(FindSettings settings)
+    private bool BuildFilters(FindSettings settings)
     {
+        // FILES
         var filterOpts = new FileFilterFactory.FilterOptions(
             Pattern: State.Pattern,
             MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
@@ -219,7 +221,6 @@ class FindPlugin : Plugin
         try
         {
             State.FileFilter = FileFilterFactory.CreateFilter(filterOpts);
-            return true;
         }
         catch (ArgumentException ex)
         {
@@ -231,6 +232,34 @@ class FindPlugin : Plugin
             PrintError("Errore durante la creazione dei filtri per i file: " + ex.Message);
             return false;
         }
+
+        // DIRECTORY (EXCLUDE)
+        // se il pattern è vuoto non perdo tempo a provare a crearlo
+        if (string.IsNullOrEmpty(settings.ExcludeDirsPattern)) return true;
+        
+        // filtro molto semplice fatto solo sul nome, da espandere in futuro con altri filtri magari
+        var directoryFilter = new FileFilterFactory.FilterOptions(
+            Pattern: settings.ExcludeDirsPattern,
+            MatchType: FilterFileNameMatchType.Regex,
+            MatchFullPath: true // filtro su tutto il percorso per le cartelle
+        );
+
+        try
+        {
+            State.DirectoryExcludeFilter = FileFilterFactory.CreateFilter(directoryFilter);
+        }
+        catch (ArgumentException ex)
+        {
+            PrintError("Il pattern di esclusione delle cartelle fornito non è valido: " + ex.Message);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            PrintError("Errore durante la creazione dei filtri per l'esclusione delle cartelle: " + ex.Message);
+            return false;
+        }
+
+        return true;
     }
 
     #endregion
@@ -250,6 +279,7 @@ class FindPlugin : Plugin
             AttributesToSkip = attributesToSkip,
             RecurseSubdirectories = State.Recurse,
             Filter = State.FileFilter,
+            DirectoryExcludeFilter = State.DirectoryExcludeFilter,
             BufferSize = 64 * 1024,
             SingleReader = true,
             ReturnDirectoriesInOutput = settings.Dirs,

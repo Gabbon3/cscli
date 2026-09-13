@@ -136,6 +136,13 @@ namespace lib.io
                                     {
                                         if (entry.IsDirectory)
                                         {
+                                            // filtro di esclusione sulle cartelle per l'esplorazione (accodamento sul dirChannel)
+                                            // se match true allora ignoro completamente questo percorso
+                                            if (options.DirectoryExcludeFilter != null && options.DirectoryExcludeFilter(ref entry))
+                                            {
+                                                return false;
+                                            }
+
                                             localDirs++;
 
                                             if (options.RecurseSubdirectories)
@@ -152,7 +159,7 @@ namespace lib.io
                                             {
                                                 return false;
                                             }
-                                            // filtro sulla cartella
+                                            // filtro sulla cartella per l'output
                                             if (options.Filter != null)
                                             {
                                                 return options.Filter(ref entry);

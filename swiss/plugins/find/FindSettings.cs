@@ -44,6 +44,9 @@ namespace plugins.find
         [Option(CliMeta.ThreadsFlag, "Numero di thread usati nella ricerca (1 se sei su HDD)", "Configurazione")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 
+        [Option(CliMeta.DirsExcludePatternFlag, CliMeta.DirsExcludePatternDesc, "Configurazione")]
+        public string? ExcludeDirsPattern { get; set; } = null;
+
         // --- OPZIONI CLASSIFICA ---
         [Option("biggest|B", "Restituisce i file più grandi", "Classifica")]
         public bool Biggest { get; set; }

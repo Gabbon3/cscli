@@ -27,6 +27,13 @@ namespace lib.io
         /// </summary>
         public FileSystemFilter? Filter { get; set; }
 
+        /// <summary>
+        /// Filtro personalizzato da applicare alle cartelle da escludere durante la ricerca
+        /// Se restituisce true, allora la directory verà ignorata per la scansione evitando ricorsione inutilmente
+        /// Riutilizzo la stessa struttura dei file poiche FileSystemEntry tratta cartelle e file alla stessa maniera, sono distinguibili solamente grazie alla prop IsDirectory
+        /// </summary>
+        public FileSystemFilter? DirectoryExcludeFilter { get; set; }
+
         public FastWalkerOptions()
         {
             IgnoreInaccessible = true;

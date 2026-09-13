@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.IO.Enumeration;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -5,22 +7,28 @@ using System.Text.RegularExpressions;
 namespace lib.io
 {
     public delegate bool FileSystemFilter(ref FileSystemEntry entry);
+
+    // Delegato personalizzato essenziale: in C# le 'ref struct' (come ReadOnlySpan<char>) 
+    // non possono essere usate nei tipi generici standard come Func<T, R>.
+    public delegate bool SpanMatchDelegate(ReadOnlySpan<char> span);
+
     public enum FilterFileNameMatchType
     {
         Regex, // usa regex compilata non backtracking
         Fixed, // usa indexOf
-        Glob // pattern glob semplice, simile a regex ma piu veloce
+        Glob   // pattern glob semplice, simile a regex ma piu veloce
     }
+
     public static class FileFilterFactory
     {
-        // enum per definire il tipo di ricerca
         // Record che raggruppa tutti i filtri
         public record FilterOptions(
             string? Pattern = null,
             FilterFileNameMatchType MatchType = FilterFileNameMatchType.Regex, // default regex per semplicita
             bool IgnoreCase = true,
             RelativeDateTime? DateAfter = null,
-            RelativeDateTime? DateBefore = null
+            RelativeDateTime? DateBefore = null,
+            bool MatchFullPath = false // se true il controllo sul pattern verrà esteso all'intero percorso
         )
         {
             /// <summary>
@@ -41,7 +49,9 @@ namespace lib.io
                         FilterFileNameMatchType.Glob => "Pattern glob",
                         _ => "Sconosciuto"
                     };
-                    sb.AppendLine($"[Cyan]*[/] Nome file: Corrispondenza {matchStr} con '{Pattern}' {caseStr}");
+                    // Aggiungo il contesto dell'ambito di ricerca
+                    string scopeStr = MatchFullPath ? "su percorso completo" : "su nome elemento";
+                    sb.AppendLine($"[Cyan]*[/] Filtro: Corrispondenza {matchStr} con '{Pattern}' {caseStr} {scopeStr}");
                 }
 
                 if (DateAfter.HasValue)
@@ -84,13 +94,48 @@ namespace lib.io
         }
 
         /// <summary>
-        /// Genera il delegate ad alte prestazioni per il filtraggio dei file
+        /// Helper ad alte prestazioni che decide, senza creare overhead, quale Span passare alla logica di match.
+        /// Unisce il percorso sullo stack (Zero-Allocation) se è richiesto il MatchFullPath.
+        /// </summary>
+        private static bool MatchOnTarget(ref FileSystemEntry entry, bool checkFullPath, SpanMatchDelegate matchFunc)
+        {
+            // FAST PATH: controllo esclusivo sul nome del file/cartella corrente
+            if (!checkFullPath)
+            {
+                return matchFunc(entry.FileName);
+            }
+
+            // FULL PATH: Ricostruzione del percorso completo sullo STACK per evitare allocazioni in Heap.
+            ReadOnlySpan<char> dir = entry.Directory;
+            ReadOnlySpan<char> name = entry.FileName;
+            int totalLen = dir.Length + 1 + name.Length;
+
+            // Se il path rientra nei 512 caratteri (99.9% dei casi) andiamo sullo stack.
+            // Se eccede, per non mandare in overflow lo stack del thread, facciamo fallback sull'heap.
+            Span<char> buffer = totalLen <= 512
+                ? stackalloc char[totalLen]
+                : new char[totalLen];
+
+            // 1. Copia la cartella madre
+            dir.CopyTo(buffer);
+            // 2. Aggiunge lo slash del sistema operativo ('\' o '/')
+            buffer[dir.Length] = Path.DirectorySeparatorChar;
+            // 3. Appende il nome finale
+            name.CopyTo(buffer[(dir.Length + 1)..]);
+
+            // Passiamo il buffer unificato alla logica di test (regex, fixed o glob)
+            return matchFunc(buffer);
+        }
+
+        /// <summary>
+        /// Genera il delegate ad alte prestazioni per il filtraggio
         /// </summary>
         public static FileSystemFilter? CreateFilter(FilterOptions options)
         {
-            // parto da filtro nullo cosi se non sono stati richiesti volo
+            // Parto da filtro nullo cosi se non sono stati richiesti volo
             FileSystemFilter? finalFilter = null;
-            // helper per aggiungere un filtro alla catena
+            
+            // Helper per aggiungere un filtro alla catena
             void AddFilter(FileSystemFilter newFilter)
             {
                 if (finalFilter == null)
@@ -120,16 +165,22 @@ namespace lib.io
                 var date = options.DateBefore.Value;
                 AddFilter((ref FileSystemEntry entry) => SelectDateUtc(ref entry, date.Field) <= date.ValueUtc);
             }
-            // --- FILTRO SUL NOME (regex o indexof semplice) ---
+            
+            // --- FILTRO SUL NOME / PERCORSO ---
             if (!string.IsNullOrEmpty(options.Pattern))
             {
+                // Salviamo il flag per evitare l'accesso continuativo alla proprietà nel loop
+                bool fullPath = options.MatchFullPath;
+
                 if (options.MatchType == FilterFileNameMatchType.Fixed)
                 {
                     // Fixed: pura ricerca di sottostringa (IndexOf)
                     StringComparison comp = options.IgnoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
                     string pattern = options.Pattern;
 
-                    AddFilter((ref FileSystemEntry entry) => entry.FileName.IndexOf(pattern.AsSpan(), comp) >= 0);
+                    // MatchOnTarget si occupa di fornirci lo Span corretto (FileName o Percorso Completo)
+                    AddFilter((ref FileSystemEntry entry) => 
+                        MatchOnTarget(ref entry, fullPath, span => span.IndexOf(pattern.AsSpan(), comp) >= 0));
                 }
                 else if (options.MatchType == FilterFileNameMatchType.Glob)
                 {
@@ -137,7 +188,8 @@ namespace lib.io
                     string pattern = options.Pattern;
                     bool ignoreCase = options.IgnoreCase;
 
-                    AddFilter((ref FileSystemEntry entry) => FileSystemName.MatchesSimpleExpression(pattern.AsSpan(), entry.FileName, ignoreCase));
+                    AddFilter((ref FileSystemEntry entry) => 
+                        MatchOnTarget(ref entry, fullPath, span => FileSystemName.MatchesSimpleExpression(pattern.AsSpan(), span, ignoreCase)));
                 }
                 else
                 {
@@ -146,7 +198,9 @@ namespace lib.io
                     if (options.IgnoreCase) regexOptions |= RegexOptions.IgnoreCase;
                     var regex = new Regex(options.Pattern, regexOptions);
 
-                    AddFilter((ref FileSystemEntry entry) => regex.IsMatch(entry.FileName));
+                    // Regex.IsMatch opera a livello di buffer, no altre stringhe
+                    AddFilter((ref FileSystemEntry entry) => 
+                        MatchOnTarget(ref entry, fullPath, span => regex.IsMatch(span)));
                 }
             }
             return finalFilter;

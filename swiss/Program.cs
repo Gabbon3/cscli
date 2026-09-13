@@ -18,8 +18,8 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.1.2";
-const string versionDescription = "Supporto per filtri temporali estesi";
+const string version = "2.1.3";
+const string versionDescription = "Supporto per filtri di esclusione cartelle";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();

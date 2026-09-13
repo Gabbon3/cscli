@@ -12,6 +12,10 @@ public static class CliMeta
     public const string FilePatternFlag = "pattern|p";
     public const string FilePatternDesc = "Filtra i file/cartelle in base al nome (regex)";
 
+    public const string DirsExcludePatternFlag = "dir-exclude|de";
+    public const string DirsExcludePatternDesc = "Pattern regex per le cartelle da non esplorare";
+
+
     // --- FLAG E DESCRIZIONI: CONFIGURAZIONE ---
     public const string ThreadsFlag = "threads|t";
     public const string ThreadsDesc = "Numero di thread da usare durante l'esecuzione (default: numero di core)";
