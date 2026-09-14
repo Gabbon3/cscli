@@ -182,6 +182,13 @@ public abstract class Plugin
         // double
         else if (targetType == typeof(double) && double.TryParse(value, out double doubleVal))
             prop.SetValue(obj, doubleVal);
+            
+        // relative size
+        else if (targetType == typeof(RelativeSize))
+        {
+            RelativeSize relativeSize = RelativeSize.Parse(value);
+            prop.SetValue(obj, relativeSize);
+        }
         // TODO: aggiungere supporto per altri tipi
     }
 

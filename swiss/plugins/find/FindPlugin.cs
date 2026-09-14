@@ -215,7 +215,9 @@ class FindPlugin : Plugin
             MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
             IgnoreCase: settings.IgnoreCase,
             DateBefore: settings.DateBefore,
-            DateAfter: settings.DateAfter
+            DateAfter: settings.DateAfter,
+            MinSize: settings.MinSize,
+            MaxSize: settings.MaxSize
         );
 
         try

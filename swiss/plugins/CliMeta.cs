@@ -9,6 +9,12 @@ public static class CliMeta
     public const string DateBeforeFlag = "date-before|db";
     public const string DateBeforeDesc = "Considera i file piu' vecchi della data indicata (es: 60d, 2024-01-15, 12h:a, 30d:c). Campo: m modifica (default), c creazione, a accesso";
 
+    public const string MinSizeFlag = "min-size|mins";
+    public const string MinSizeDesc = "Considera i file con dimensione >= di quella indicata (es: 5m - 5MB, 500 - 500 byte). Unita: b byte, k KB, m MB, g GB, t TB";
+    public const string MaxSizeFlag = "max-size|maxs";
+    public const string MaxSizeDesc = "Considera i file con dimensione <= di quella indicata (es: 5m - 5MB, 500 - 500 byte). Unita: b byte, k KB, m MB, g GB, t TB";
+    
+
     public const string FilePatternFlag = "pattern|p";
     public const string FilePatternDesc = "Filtra i file/cartelle in base al nome (regex)";
 

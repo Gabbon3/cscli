@@ -32,6 +32,11 @@ namespace plugins.find
         [Option(CliMeta.DateBeforeFlag, CliMeta.DateBeforeDesc, "Configurazione")]
         public RelativeDateTime? DateBefore { get; set; }
 
+        [Option(CliMeta.MinSizeFlag, CliMeta.MinSizeDesc, "Configurazione")]
+        public RelativeSize? MinSize { get; set; }
+        [Option(CliMeta.MaxSizeFlag, CliMeta.MaxSizeDesc, "Configurazione")]
+        public RelativeSize? MaxSize { get; set; }
+
         [Option(CliMeta.JustEnoughOutputFlag, CliMeta.JustEnoughOutputDesc, "Configurazione")]
         public bool JustEnoughOutput { get; set; } = false;
 

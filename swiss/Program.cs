@@ -18,8 +18,9 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.1.3";
-const string versionDescription = "Supporto per filtri di esclusione cartelle";
+const string version = "2.1.4";
+const string versionDate = "14.09.2026";
+const string versionDescription = "Supporto per filtri di dimensioni sui files";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -167,6 +168,7 @@ static void VersionInfo()
     int lineLength = versionAndDescription.Length - 18;
     ConsolePlus.WriteHr(lineLength);
     ConsolePlus.Write(versionAndDescription);
+    ConsolePlus.Write($"[Cyan]*[/] Date: [Green]{versionDate}");
     ConsolePlus.Write($"[Cyan]*[/] Author: [Green]{author}");
     ConsolePlus.WriteHr(lineLength);
 }

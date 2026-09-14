@@ -28,6 +28,8 @@ namespace lib.io
             bool IgnoreCase = true,
             RelativeDateTime? DateAfter = null,
             RelativeDateTime? DateBefore = null,
+            RelativeSize? MinSize = null,
+            RelativeSize? MaxSize = null,
             bool MatchFullPath = false // se true il controllo sul pattern verrà esteso all'intero percorso
         )
         {
@@ -164,6 +166,21 @@ namespace lib.io
             {
                 var date = options.DateBefore.Value;
                 AddFilter((ref FileSystemEntry entry) => SelectDateUtc(ref entry, date.Field) <= date.ValueUtc);
+            }
+
+            // --- FILTRI SULLA DIMENSIONE ---
+            if (options.MinSize.HasValue)
+            {
+                // sembra un inception ma è normale, MinSize è definito come Nullable, quindi è incapsulato in Nullable<MinSize>
+                // dove il valore effettivo di MinSize risiede in Nullable<MinSize>.Value
+                // poi di conseguenza MinSize possiede la proprietà Value, che è quella che ci interessa
+                var size = options.MinSize.Value.Value;
+                AddFilter((ref FileSystemEntry entry) => entry.Length >= size);
+            }
+            if (options.MaxSize.HasValue)
+            {
+                var size = options.MaxSize.Value.Value;
+                AddFilter((ref FileSystemEntry entry) => entry.Length <= size);
             }
             
             // --- FILTRO SUL NOME / PERCORSO ---
