@@ -1,8 +1,7 @@
-using System;
-using System.IO;
 using System.IO.Enumeration;
 using System.Text;
 using System.Text.RegularExpressions;
+using lib.utils;
 
 namespace lib.io
 {
@@ -66,6 +65,16 @@ namespace lib.io
                 {
                     var date = DateBefore.Value;
                     sb.AppendLine($"[Cyan]*[/] Piu vecchio [DarkGray](data {FieldDescription(date.Field)})[/]: {date.ValueUtc:dd.MM.yyyy HH:mm} UTC");
+                }
+
+                if (MinSize.HasValue)
+                {
+                    sb.AppendLine($"[Cyan]*[/] Dimensioni >= di [DarkGray]{Formatter.Bytes(MinSize.Value.Value)}[/]");
+                }
+
+                if (MaxSize.HasValue)
+                {
+                    sb.AppendLine($"[Cyan]*[/] Dimensioni <= di [DarkGray]{Formatter.Bytes(MaxSize.Value.Value)}[/]");
                 }
 
                 if (sb.Length == 0)

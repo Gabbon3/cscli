@@ -24,6 +24,9 @@ namespace plugins.count
         [Option("ignore-case|i", "Rende la ricerca del pattern case-insensitive", "Configurazione")]
         public bool IgnoreCase { get; set; }
 
+        [Option(CliMeta.SilenceFlag, CliMeta.SilenceDesc, "Configurazione")]
+        public bool Silence { get; set; } = false;
+
         // --- FILTRI ---
         [Option(CliMeta.FilePatternFlag, CliMeta.FilePatternDesc, "Filtri")]
         public string? Pattern { get; set; }
@@ -33,5 +36,14 @@ namespace plugins.count
 
         [Option(CliMeta.DateBeforeFlag, CliMeta.DateBeforeDesc, "Filtri")]
         public RelativeDateTime? DateBefore { get; set; }
+
+        [Option(CliMeta.MinSizeFlag, CliMeta.MinSizeDesc, "Filtri")]
+        public RelativeSize? MinSize { get; set; }
+
+        [Option(CliMeta.MaxSizeFlag, CliMeta.MaxSizeDesc, "Filtri")]
+        public RelativeSize? MaxSize { get; set; }
+
+        [Option(CliMeta.DirsExcludePatternFlag, CliMeta.DirsExcludePatternDesc, "Filtri")]
+        public string? ExcludeDirsPattern { get; set; } = null;
     }
 }

@@ -9,14 +9,17 @@ namespace lib.io
     {
         private long _filesProcessed;
         private long _dirsProcessed;
+        private long _bytesProcessed;
 
-        public long FilesProcessed => Interlocked.Read(ref _filesProcessed);
-        public long DirsProcessed => Interlocked.Read(ref _dirsProcessed);
+        public long FilesProcessed => Volatile.Read(ref _filesProcessed);
+        public long DirsProcessed => Volatile.Read(ref _dirsProcessed);
+        public long BytesProcessed => Volatile.Read(ref _bytesProcessed);
 
-        internal void Add(long files, long dirs)
+        internal void Add(long files, long dirs, long bytes = 0)
         {
             Interlocked.Add(ref _filesProcessed, files);
             Interlocked.Add(ref _dirsProcessed, dirs);
+            Interlocked.Add(ref _bytesProcessed, bytes); // Nuovo
         }
     }
 
@@ -285,12 +288,18 @@ namespace lib.io
         /// accumula i totali localmente nei thread e restituisce solo il risultato finale.
         /// Bypassando i channel in uscita, le performance sono estreme.
         /// </summary>
+        /// <summary>
+        /// Attraversa il file system in parallelo e restituisce il risultato finale.
+        /// </summary>
         public static async Task<CountResult> CountAsync(
             string rootPath,
+            FastWalkerCounters? counters = null,
             FastWalkerOptions? options = null,
             CancellationToken ct = default)
         {
             options ??= new FastWalkerOptions();
+            // Se non viene passato dall'esterno, lo creiamo internamente
+            counters ??= new FastWalkerCounters();
 
             int threads = (!options.RecurseSubdirectories) ? 1 :
                 (options.MaxDegreeOfParallelism > 0 ? options.MaxDegreeOfParallelism : Environment.ProcessorCount);
@@ -309,11 +318,6 @@ namespace lib.io
                 MatchType = options.MatchType,
                 ReturnSpecialDirectories = false
             };
-
-            // Contatori globali
-            long globalFiles = 0;
-            long globalDirs = 0;
-            long globalBytes = 0;
 
             var workers = new Task[threads];
 
@@ -334,13 +338,12 @@ namespace lib.io
                             {
                                 var enumerable = new FileSystemEnumerable<byte>(
                                     currentDir,
-                                    (ref FileSystemEntry entry) => 0, // calcolo tutto nel predicate, non serve nessun transform 
+                                    (ref FileSystemEntry entry) => 0,
                                     localOptions
                                 )
                                 {
                                     ShouldIncludePredicate = (ref FileSystemEntry entry) =>
                                     {
-                                        // 1. Gestione Cartelle
                                         if (entry.IsDirectory)
                                         {
                                             if (options.RecurseSubdirectories)
@@ -352,17 +355,14 @@ namespace lib.io
                                                 }
                                             }
 
-                                            // Se le cartelle vanno contate e passano il filtro
                                             if (options.ReturnDirectoriesInOutput && (options.Filter == null || options.Filter(ref entry)))
                                             {
                                                 localDirs++;
                                             }
 
-                                            // restituisco SEMPRE false poichè non è necessario calcolare altro
                                             return false;
                                         }
 
-                                        // 2. Gestione File
                                         if (options.Filter != null && !options.Filter(ref entry))
                                         {
                                             return false;
@@ -370,12 +370,10 @@ namespace lib.io
 
                                         localFiles++;
                                         localBytes += entry.Length;
-
-                                        return false; // come prima, sempre false in uscita
+                                        return false;
                                     }
                                 };
 
-                                // loop che gira a vuoto, giusto perche cosi enumeriamo
                                 using var enumerator = enumerable.GetEnumerator();
                                 while (enumerator.MoveNext()) { }
                             }
@@ -388,24 +386,34 @@ namespace lib.io
                                 {
                                     dirChannel.Writer.TryComplete();
                                 }
+
+                                if (localFiles > 0 || localDirs > 0 || localBytes > 0)
+                                {
+                                    counters.Add(localFiles, localDirs, localBytes);
+                                    // reset dei contatori locali per la prossima cartella
+                                    localFiles = 0;
+                                    localDirs = 0;
+                                    localBytes = 0;
+                                }
                             }
                         }
                     }
                     catch (OperationCanceledException) { }
                     finally
                     {
-                        // Il thread ha finito di lavorare: aggiorno i totali globali
-                        Interlocked.Add(ref globalFiles, localFiles);
-                        Interlocked.Add(ref globalDirs, localDirs);
-                        Interlocked.Add(ref globalBytes, localBytes);
+                        // in caso di stop improvviso scarichiamo in ogni caso gli ultimi dati
+                        if (localFiles > 0 || localDirs > 0 || localBytes > 0)
+                        {
+                            counters.Add(localFiles, localDirs, localBytes);
+                        }
                     }
                 }, ct);
             }
 
-            // attendo che tutti i thread abbiano finito
             await Task.WhenAll(workers);
 
-            return new CountResult(globalFiles, globalDirs, globalBytes);
+            // Restituiamo il risultato leggendo direttamente i contatori globali finali
+            return new CountResult(counters.FilesProcessed, counters.DirsProcessed, counters.BytesProcessed);
         }
         #endregion
     }

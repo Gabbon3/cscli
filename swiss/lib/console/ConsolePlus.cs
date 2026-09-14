@@ -101,7 +101,7 @@ public static class ConsolePlus
                 i = closeBracket;
                 lastPos = i + 1;
             }
-            else if (tagContent.Equals("b", StringComparison.OrdinalIgnoreCase) || 
+            else if (tagContent.Equals("b", StringComparison.OrdinalIgnoreCase) ||
                      tagContent.Equals("bold", StringComparison.OrdinalIgnoreCase))
             {
                 Console.Out.Write(AnsiBold);
@@ -174,6 +174,51 @@ public static class ConsolePlus
     public static void Write(string text, bool newLine = true)
     {
         Write(text.AsSpan(), newLine);
+    }
+
+    /// <summary>
+    /// Sovrascrive la riga corrente sulla console (ideale per progress bar e contatori live).
+    /// Sfrutta il Carriage Return (\r) e il clear-line ANSI (\x1b[K) per evitare sfarfallii.
+    /// </summary>
+    public static void WriteOverwrite(ReadOnlySpan<char> span)
+    {
+        // 1. Riporta il cursore all'inizio della riga
+        Console.Out.Write('\r');
+        // 2. Scrive il nuovo testo
+        Write(span, newLine: false);
+        // 3. ANSI Escape Code: cancella eventuali caratteri rimanenti fino alla fine della riga
+        // Questo evita che stringhe corte lascino sporco se quella precedente era più lunga
+        Console.Out.Write("\x1b[K");
+    }
+
+    public static void WriteOverwrite(string text)
+    {
+        WriteOverwrite(text.AsSpan());
+    }
+
+    /// <summary>
+    /// Cancella l'intera riga corrente su cui si trova il cursore e lo riposiziona all'inizio.
+    /// </summary>
+    public static void ClearCurrentLine()
+    {
+        Console.Out.Write("\r\x1b[K");
+    }
+
+    /// <summary>
+    /// Cancella la riga corrente e sale indietro di N righe cancellandole tutte.
+    /// Ideale per rimuovere un blocco di progresso multilinea o un menu temporaneo.
+    /// </summary>
+    /// <param name="linesCount">Numero di righe da cancellare verso l'alto (default 1)</param>
+    public static void ClearLines(int linesCount = 1)
+    {
+        if (linesCount <= 0) return;
+        // 1. Pulizia riga corrente
+        Console.Out.Write("\r\x1b[K");
+        // 2. Per ogni riga extra, saliamo di 1 (\x1b[1A) e la puliamo (\x1b[K)
+        for (int i = 1; i < linesCount; i++)
+        {
+            Console.Out.Write("\x1b[1A\x1b[K");
+        }
     }
 
     /// <summary>

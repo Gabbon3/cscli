@@ -35,13 +35,16 @@ namespace plugins.count
                 return;
             }
 
-            // creazione del filtro
+            // FILTRO FILES
+
             var filterOpts = new FileFilterFactory.FilterOptions(
                 Pattern: ParseMatchPattern(settings.Pattern),
                 MatchType: settings.FixedMatch ? FilterFileNameMatchType.Fixed : FilterFileNameMatchType.Regex,
                 IgnoreCase: settings.IgnoreCase,
                 DateBefore: settings.DateBefore,
-                DateAfter: settings.DateAfter
+                DateAfter: settings.DateAfter,
+                MinSize: settings.MinSize,
+                MaxSize: settings.MaxSize
             );
 
             FileSystemFilter? fileFilter;
@@ -55,7 +58,29 @@ namespace plugins.count
                 return;
             }
 
-            // configurazione walker
+            // FILTRO DIRECTORY (EXCLUDE)
+            // se il pattern è vuoto non perdo tempo a provare a crearlo
+            FileSystemFilter? directoryFilter = null;
+            if (!string.IsNullOrEmpty(settings.ExcludeDirsPattern))
+            {
+                // filtro molto semplice fatto solo sul nome, da espandere in futuro con altri filtri magari
+                var directoryFilterOptions = new FileFilterFactory.FilterOptions(
+                    Pattern: settings.ExcludeDirsPattern,
+                    MatchType: FilterFileNameMatchType.Regex,
+                    MatchFullPath: true // filtro su tutto il percorso per le cartelle
+                );
+                try
+                {
+                    directoryFilter = FileFilterFactory.CreateFilter(directoryFilterOptions);
+                }
+                catch (Exception ex)
+                {
+                    PrintError("Errore filtro directory: " + ex.Message);
+                }
+            }
+
+            // CONFIGURAZIONE FASTWALKER
+
             FileAttributes attributesToSkip = FileAttributes.None;
             if (!settings.IncludeHidden) attributesToSkip = FileAttributes.Hidden;
 
@@ -63,18 +88,48 @@ namespace plugins.count
             {
                 IgnoreInaccessible = true,
                 RecurseSubdirectories = settings.Recursive,
-                BufferSize = 64 * 1024,
                 ReturnDirectoriesInOutput = settings.IncludeDirectory,
                 Filter = fileFilter,
+                DirectoryExcludeFilter = directoryFilter,
                 SingleReader = true,
-                AttributesToSkip = attributesToSkip
+                AttributesToSkip = attributesToSkip,
             };
 
+            // dichiaro un oggetto di conteggio per avere traccia UI a pulsazioni del progressivo del conteggio
+            var counters = new FastWalkerCounters();
+            using var ctsCounterUI = new CancellationTokenSource();
+
+            // ESECUZIONE MONITOR PROGRESSIVO UI
+            Task? monitorTask = null;
+            if (!settings.Silence)
+            {
+                monitorTask = Task.Run(async () =>
+                {
+                    while (!ctsCounterUI.IsCancellationRequested)
+                    {
+                        ConsolePlus.WriteOverwrite($"File: [Yellow]{counters.FilesProcessed:N0}[/] | Dirs: [Blue]{counters.DirsProcessed:N0}[/] | Size: [Green]{Formatter.Bytes(counters.BytesProcessed)} [DarkGray]...[/]");
+                        await Task.Delay(1000, ctsCounterUI.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                    }
+                }, ct);
+            }
+
+            // ESECUZIONE PRINCIPALE
+
             FastWalker.CountResult result = await FastWalker.CountAsync(
-                root,
-                fastWalkerOptions,
-                ct
+                rootPath: root,
+                options: fastWalkerOptions,
+                counters: counters,
+                ct: ct
             );
+
+            if (!settings.Silence)
+            {
+                ctsCounterUI.Cancel();
+                if (monitorTask != null) await monitorTask;
+                ConsolePlus.ClearCurrentLine();
+            }
+
+            // RISULTATI FINALI
 
             ConsolePlus.Write($"\n[Cyan]#[/] Conteggio completato:");
             ConsolePlus.Write($"[Cyan]*[/] Files: [Yellow]{result.Files:N0}[/]");
