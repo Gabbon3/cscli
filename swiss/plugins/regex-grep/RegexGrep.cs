@@ -117,7 +117,7 @@ namespace plugins.regexgrep
             // 6. inizializzo cronometro per tracciare il tempo di esecuzione effettivo
             long startTimestamp = Stopwatch.GetTimestamp();
             // ---
-            ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca con regex...\n[DarkGray]*\n*[/]");
+            if (!settings.JustEnoughOutput) ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca con regex...\n[DarkGray]*\n*[/]");
             // ---
             try
             {
@@ -139,17 +139,20 @@ namespace plugins.regexgrep
             // 10. termine esecuzione, calcolo statistiche finali
             TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
             // ---
-            if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
-            ConsolePlus.WriteBoxHeader($"Ricerca completata", 40, ConsoleColor.Green);
-            ConsolePlus.WriteList([
-                $"Match totali: [Cyan]{Telemetry.TotalMatchCount:N0}[/]",
-                $"File totali trovati: [Yellow]{Telemetry.TotalFileFounded:N0}[/]",
-                $"File totali processati: [Magenta]{Telemetry.TotalFileProcessed:N0}[/]",
-                $"Spazio totale controllato: [DarkGray]{Formatter.Bytes(Telemetry.TotalSizeVisited)}[/]",
-                $"Throughput: [Cyan]{Formatter.Throughput(Telemetry.TotalSizeVisited, elapsed.TotalSeconds)}[/]",
-                $"Scritture Channel: [DarkGray]sync {Telemetry.ChannelWriteSync} - async {Telemetry.ChannelWriteAsync}[/]"
-            ]);
-            ConsolePlus.WriteHr(40);
+            if (!settings.JustEnoughOutput)
+            {
+                if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
+                ConsolePlus.WriteBoxHeader($"Ricerca completata", 40, ConsoleColor.Green);
+                ConsolePlus.WriteList([
+                    $"Match totali: [Cyan]{Telemetry.TotalMatchCount:N0}[/]",
+                    $"File totali trovati: [Yellow]{Telemetry.TotalFileFounded:N0}[/]",
+                    $"File totali processati: [Magenta]{Telemetry.TotalFileProcessed:N0}[/]",
+                    $"Spazio totale controllato: [DarkGray]{Formatter.Bytes(Telemetry.TotalSizeVisited)}[/]",
+                    $"Throughput: [Cyan]{Formatter.Throughput(Telemetry.TotalSizeVisited, elapsed.TotalSeconds)}[/]",
+                    $"Scritture Channel: [DarkGray]sync {Telemetry.ChannelWriteSync} - async {Telemetry.ChannelWriteAsync}[/]"
+                ]);
+                ConsolePlus.WriteHr(40);
+            }
         }
 
         #endregion

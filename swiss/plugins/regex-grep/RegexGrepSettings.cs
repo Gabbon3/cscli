@@ -41,6 +41,9 @@ namespace plugins.regexgrep
         [Option(CliMeta.ThreadsFlag, CliMeta.ThreadsDesc, "Configurazione")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 
+        [Option(CliMeta.JustEnoughOutputFlag, CliMeta.JustEnoughOutputDesc, "Configurazione")]
+        public bool JustEnoughOutput { get; set; } = false;
+
         // filtri
 
         [Option("dir-exclude|ex", "Aggiunge cartelle da escludere (separate da virgola)", "Filtri")]
