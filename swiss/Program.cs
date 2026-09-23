@@ -18,9 +18,9 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.1.4";
-const string versionDate = "14.09.2026";
-const string versionDescription = "Supporto per filtri di dimensioni sui files";
+const string version = "2.1.5";
+const string versionDate = "23.09.2026";
+const string versionDescription = "Grep options fixed";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
