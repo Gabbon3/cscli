@@ -35,13 +35,13 @@ Console.CancelKeyPress += (sender, e) =>
 };
 // registro dei plugin
 List<PluginRegistration> plugins = [
-    new("find", "Cerca file nel file system", () => new FindPlugin()),
-    new("tree", "Mostra l'albero delle directory", () => new TreePlugin()),
-    new("eliminator", "Elimina file o cartelle in modo sicuro", () => new EliminatorPlugin()),
-    new("count", "Conta il numero di file e/o cartelle", () => new CountPlugin()),
-    new("mdconverter", "Converte un file md in html (default) e pdf", () => new MdConverterPlugin()),
-    new("grep", "Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)", () => new RegexGrepPlugin()),
-    new("move", "Tool multithreaded per lo spostamento di file e cartelle", () => new MovePlugin()),
+    new("find", "Ricerca file", () => new FindPlugin()),
+    new("tree", "Mostra albero delle directory", () => new TreePlugin()),
+    new("eliminator", "Eliminatore di files", () => new EliminatorPlugin()),
+    new("count", "Conteggio files", () => new CountPlugin()),
+    new("mdconverter", "Conversione file md in html (default) e pdf", () => new MdConverterPlugin()),
+    new("grep", "Grep Regex e non (UTF-8)", () => new RegexGrepPlugin()),
+    new("move", "Sposta files", () => new MovePlugin()),
 ];
 // # ----------------------- #
 
