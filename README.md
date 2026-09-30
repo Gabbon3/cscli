@@ -5,13 +5,13 @@ Orientato al multithreading e alla gestione del codice a basso livello.
 
 ## Comandi supportati
 
-* `find` - Cerca file nel file system
-* `tree` - Mostra l'albero delle directory
-* `eliminator` - Elimina file o cartelle in modo sicuro
-* `count` - Conta il numero di file e/o cartelle
-* `mdconverter` - Converte un file md in html (default) e pdf
-* `grep` - Ricerca con espressioni regolari .NET (NonBacktracking, zero-alloc)
-* `move` - Tool multithreaded per lo spostamento di file e cartelle
+* `find` - Ricerca file
+* `tree` - Mostra albero delle directory
+* `eliminator` - Eliminatore di files
+* `count` - Conteggio files
+* `mdconverter` - Conversione file md in html (default) e pdf
+* `grep` - Grep Regex e non (UTF-8)
+* `move` - Sposta files
 
 Per la guida completa di ogni comando usa il flag `--help` o `-h` (es. `swiss find --help`)
 
