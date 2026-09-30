@@ -62,7 +62,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Spectre.Console" Version="0.55.2" />
-		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.5" />
+		<PackageReference Include="System.Diagnostics.EventLog" Version="10.0.12" />
 	</ItemGroup>
 
 	<ItemGroup>

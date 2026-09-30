@@ -2,6 +2,7 @@
 using plugins;
 using lib.console;
 using Spectre.Console;
+using lib.io.log;
 // lista plugins
 using plugins.find;
 using plugins.tree;
@@ -18,9 +19,11 @@ AnsiConsole.Profile.Encoding = System.Text.Encoding.UTF8;
 AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
-const string version = "2.1.5";
-const string versionDate = "23.09.2026";
+const string version = "2.2.0";
+const string versionDate = "30.09.2026";
 const string author = "Gabbon3";
+// traccio su event log
+// AuditLogger.LogCommandExecution(string.Join(' ', args));
 // cancellation token
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (sender, e) =>
