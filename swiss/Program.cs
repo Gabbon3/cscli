@@ -20,7 +20,6 @@ AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
 const string version = "2.1.5";
 const string versionDate = "23.09.2026";
-const string versionDescription = "Grep options fixed";
 const string author = "Gabbon3";
 // cancellation token
 using var cts = new CancellationTokenSource();
@@ -164,7 +163,7 @@ static void Help(List<PluginRegistration> plugins)
 
 static void VersionInfo()
 {
-    string versionAndDescription = $"[Cyan]*[/] [Green]{version}[/] - {versionDescription}";
+    string versionAndDescription = $"[Cyan]*[/] Version: [Green]{version}[/]";
     int lineLength = versionAndDescription.Length - 18;
     ConsolePlus.WriteHr(lineLength);
     ConsolePlus.Write(versionAndDescription);
