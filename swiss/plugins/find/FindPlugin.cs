@@ -102,7 +102,9 @@ class FindPlugin : Plugin
         // 2. valido e parsifico le settings
         if (!ParseAndValidateSettings(settings, ct)) return;
         // 3. configuro le opzioni per il ranking (se richiesto)
-        ConfigureRankingMode(settings);
+        try { ConfigureRankingMode(settings); }
+        catch (ArgumentException ex) { PrintError($"Errore di configurazione: {ex.Message}"); return; }
+        catch (Exception) { throw; }
         // 4. costruisco il filtro per cercare i file (il motore vero del plugin)
         if (!BuildFilters(settings)) return;
         // 5. creo la configurazione del FastWalker
@@ -138,6 +140,7 @@ class FindPlugin : Plugin
         State.Root = root;
         State.Pattern = ParseMatchPattern(settings.Pattern);
         State.Recurse = settings.RecurseSubdirectories;
+        State.Config.Limit = settings.Limit;
 
         // # Fast Printer
         State.Format = FastPrinter.GetOutputFormat(settings.Format);
@@ -178,12 +181,14 @@ class FindPlugin : Plugin
 
         if (State.IsRanking)
         {
+            // controllo se è stato impostato un limite valido
+            if (settings.Limit < 1) throw new ArgumentException("Il limite deve essere maggiore di 0.");
+
             State.PriorityQueue = new PriorityQueue<StackFileInfo, long>();
             State.Config.Oldest = settings.Oldest;
             State.Config.Newest = settings.Newest;
             State.Config.Biggest = settings.Biggest;
             State.Config.Smallest = settings.Smallest;
-            State.Config.Limit = settings.Limit;
 
             if (settings.Biggest)
                 State.PrioritySelector = item => item.Length;
@@ -294,22 +299,33 @@ class FindPlugin : Plugin
     /// <summary>
     /// Avvia il walker, legge i file e li processa tramite la strategy configurata.
     /// </summary>
+    /// <param name="walkerOptions">Opzioni per il walker.</param>
+    /// <param name="ct">Token di cancellazione globale.</param>
+    /// <returns>Task che rappresenta l'operazione asincrona.</returns>
     private async Task ProcessFilesAsync(FastWalkerOptions walkerOptions, CancellationToken ct)
     {
+        using var scanCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var scanToken = scanCts.Token;
+
         var walkerReader = FastWalker.Walk<StackFileInfo>(
             State.Root,
             (ref FileSystemEntry entry) => new StackFileInfo(ref entry),
             State.Counters,
             walkerOptions,
-            ct
+            scanToken
         );
 
         try
         {
-            await foreach (var item in walkerReader.ReadAllAsync(ct))
+            await foreach (var item in walkerReader.ReadAllAsync(scanToken))
             {
                 State.MatchCount++;
                 State.ProcessItemStrategy!(item);
+                if (!State.IsRanking && State.Config.Limit > 0 && State.MatchCount >= State.Config.Limit)
+                {
+                    scanCts.Cancel();
+                    break;
+                }
                 ct.ThrowIfCancellationRequested();
             }
         }

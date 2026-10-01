@@ -52,6 +52,9 @@ namespace plugins.find
         [Option(CliMeta.DirsExcludePatternFlag, CliMeta.DirsExcludePatternDesc, "Configurazione")]
         public string? ExcludeDirsPattern { get; set; } = null;
 
+        [Option("limit|l", "Limita il numero di risultati", "Configurazione")]
+        public int Limit { get; set; } = 0;
+
         // --- OPZIONI CLASSIFICA ---
         [Option("biggest|B", "Restituisce i file più grandi", "Classifica")]
         public bool Biggest { get; set; }
@@ -64,9 +67,6 @@ namespace plugins.find
 
         [Option("oldest|O", "Restituisce i file più vecchi", "Classifica")]
         public bool Oldest { get; set; }
-
-        [Option("limit|l", "Limita il numero di risultati nella classifica (default 10)", "Classifica")]
-        public int Limit { get; set; } = 10;
 
         // output
 
