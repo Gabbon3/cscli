@@ -37,8 +37,8 @@ namespace plugins.find
         [Option(CliMeta.MaxSizeFlag, CliMeta.MaxSizeDesc, "Configurazione")]
         public RelativeSize? MaxSize { get; set; }
 
-        [Option(CliMeta.JustEnoughOutputFlag, CliMeta.JustEnoughOutputDesc, "Configurazione")]
-        public bool JustEnoughOutput { get; set; } = false;
+        [Option(CliMeta.MinimalOutputFlag, CliMeta.MinimalOutputDesc, "Configurazione")]
+        public bool MinimalOutput { get; set; } = false;
 
         [Option("recurse|r", "Se attivo ricerca anche nelle sottocartelle", "Configurazione")]
         public bool RecurseSubdirectories { get; set; } = false;

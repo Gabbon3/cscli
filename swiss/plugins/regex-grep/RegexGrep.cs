@@ -117,7 +117,7 @@ namespace plugins.regexgrep
             // 6. inizializzo cronometro per tracciare il tempo di esecuzione effettivo
             long startTimestamp = Stopwatch.GetTimestamp();
             // ---
-            if (!settings.JustEnoughOutput) ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca con regex...\n[DarkGray]*\n*[/]");
+            if (!settings.MinimalOutput) ConsolePlus.Write($"[Cyan]#[/] Inizio la ricerca con regex...\n[DarkGray]*\n*[/]");
             // ---
             try
             {
@@ -139,7 +139,7 @@ namespace plugins.regexgrep
             // 10. termine esecuzione, calcolo statistiche finali
             TimeSpan elapsed = Stopwatch.GetElapsedTime(startTimestamp);
             // ---
-            if (!settings.JustEnoughOutput)
+            if (!settings.MinimalOutput)
             {
                 if (CountOnly) ConsolePlus.Write("[DarkGray]*\n*[/]");
                 ConsolePlus.WriteBoxHeader($"Ricerca completata", 40, ConsoleColor.Green);

@@ -370,6 +370,15 @@ namespace lib.io
 
                                         localFiles++;
                                         localBytes += entry.Length;
+                                        // flush ogni 1024 file
+                                        if (localFiles >= 1024)
+                                        {
+                                            counters.Add(localFiles, localDirs, localBytes);
+                                            localFiles = 0;
+                                            localDirs = 0;
+                                            localBytes = 0;
+                                            ct.ThrowIfCancellationRequested();
+                                        }
                                         return false;
                                     }
                                 };
@@ -377,6 +386,7 @@ namespace lib.io
                                 using var enumerator = enumerable.GetEnumerator();
                                 while (enumerator.MoveNext()) { }
                             }
+                            catch (OperationCanceledException) { throw; }
                             catch (UnauthorizedAccessException) { }
                             catch (DirectoryNotFoundException) { }
                             catch (Exception) { }
@@ -386,22 +396,14 @@ namespace lib.io
                                 {
                                     dirChannel.Writer.TryComplete();
                                 }
-
-                                if (localFiles > 0 || localDirs > 0 || localBytes > 0)
-                                {
-                                    counters.Add(localFiles, localDirs, localBytes);
-                                    // reset dei contatori locali per la prossima cartella
-                                    localFiles = 0;
-                                    localDirs = 0;
-                                    localBytes = 0;
-                                }
                             }
                         }
                     }
                     catch (OperationCanceledException) { }
                     finally
                     {
-                        // in caso di stop improvviso scarichiamo in ogni caso gli ultimi dati
+                        // in caso di stop improvviso oppure a termine esecuzione
+                        // scarichiamo in ogni caso gli ultimi dati
                         if (localFiles > 0 || localDirs > 0 || localBytes > 0)
                         {
                             counters.Add(localFiles, localDirs, localBytes);

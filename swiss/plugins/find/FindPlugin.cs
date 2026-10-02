@@ -94,7 +94,7 @@ class FindPlugin : Plugin
         }
 
         // print di avvio
-        if (!settings.JustEnoughOutput) {
+        if (!settings.MinimalOutput) {
             ConsolePlus.Write($"[Cyan]#[/] Avvio ricerca...\n");
         }
             
@@ -117,7 +117,7 @@ class FindPlugin : Plugin
         if (State.IsRanking) PrintRankingResults();
         // 8. statistiche finali
         await State.Printer.Complete();
-        if (!settings.JustEnoughOutput) PrintFinalSummary();
+        if (!settings.MinimalOutput) PrintFinalSummary();
     }
 
     // # ---------------------------------- #
@@ -182,7 +182,11 @@ class FindPlugin : Plugin
         if (State.IsRanking)
         {
             // controllo se è stato impostato un limite valido
-            if (settings.Limit < 1) throw new ArgumentException("Il limite deve essere maggiore di 0.");
+            if (State.Config.Limit == 0)
+            {
+                State.Config.Limit = 10; // Imposto un limite di default se non specificato per la modalità ranking
+            }
+            else if (State.Config.Limit < 1) throw new ArgumentException("Il limite deve essere maggiore di 0.");
 
             State.PriorityQueue = new PriorityQueue<StackFileInfo, long>();
             State.Config.Oldest = settings.Oldest;

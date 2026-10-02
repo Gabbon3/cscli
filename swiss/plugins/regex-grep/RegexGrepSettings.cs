@@ -41,8 +41,8 @@ namespace plugins.regexgrep
         [Option(CliMeta.ThreadsFlag, CliMeta.ThreadsDesc, "Configurazione")]
         public int Threads { get; set; } = Environment.ProcessorCount;
 
-        [Option(CliMeta.JustEnoughOutputFlag, CliMeta.JustEnoughOutputDesc, "Configurazione")]
-        public bool JustEnoughOutput { get; set; } = false;
+        [Option(CliMeta.MinimalOutputFlag, CliMeta.MinimalOutputDesc, "Configurazione")]
+        public bool MinimalOutput { get; set; } = false;
 
         // filtri
 

@@ -20,7 +20,7 @@ AnsiConsole.Profile.Capabilities.Ansi = true;
 AnsiConsole.Profile.Capabilities.ColorSystem = ColorSystem.Standard;
 // info sulla versione
 const string version = "2.3.0";
-const string versionDate = "30.09.2026";
+const string versionDate = "02.10.2026";
 const string author = "Gabbon3";
 // traccio su event log
 // AuditLogger.LogCommandExecution(string.Join(' ', args));
@@ -166,12 +166,12 @@ static void Help(List<PluginRegistration> plugins)
 
 static void VersionInfo()
 {
-    string versionAndDescription = $"[Cyan]*[/] Version: [Green]{version}[/]";
+    string versionAndDescription = $"[Cyan]*[/] Version:   [Green]{version}[/]";
     int lineLength = versionAndDescription.Length - 18;
     ConsolePlus.WriteHr(lineLength);
     ConsolePlus.Write(versionAndDescription);
     ConsolePlus.Write($"[Cyan]*[/] Date: [Green]{versionDate}");
-    ConsolePlus.Write($"[Cyan]*[/] Author: [Green]{author}");
+    ConsolePlus.Write($"[Cyan]*[/] Author:  [Green]{author}");
     ConsolePlus.WriteHr(lineLength);
 }
 

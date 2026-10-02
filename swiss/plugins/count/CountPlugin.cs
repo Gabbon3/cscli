@@ -131,14 +131,21 @@ namespace plugins.count
 
             // RISULTATI FINALI
 
-            ConsolePlus.Write($"\n[Cyan]#[/] Conteggio completato:");
+            if (ct.IsCancellationRequested)
+            {
+                ConsolePlus.Write($"\n[Cyan]#[/] Conteggio parziale completato:");
+            }
+            else
+            {
+                ConsolePlus.Write($"\n[Cyan]#[/] Conteggio completato:");
+            }
             ConsolePlus.Write($"[Cyan]*[/] Files: [Yellow]{result.Files:N0}[/]");
             ConsolePlus.Write($"[Cyan]*[/] Dimensione: [Green]{Formatter.Bytes(result.Bytes)}[/]");
             if (settings.IncludeDirectory)
             {
                 ConsolePlus.Write($"[Cyan]*[/] Cartelle: [Blue]{result.Directories:N0}[/]");
             }
-            ConsolePlus.Write($"[Cyan]=[/] Totale: [Magenta]{result.Files + result.Directories:N0}[/]");
+            ConsolePlus.Write($"[Cyan]=[/] Totale elementi: [Magenta]{result.Files + result.Directories:N0}[/]");
         }
 
         public override void Help()
