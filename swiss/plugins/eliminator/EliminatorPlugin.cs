@@ -32,7 +32,7 @@ namespace plugins.eliminator
         {
             public string TargetPath { get; set; } = "";
 
-            public bool IsDebug { get; set; }
+            public bool IsWhatIf { get; set; }
             public EliminationStateDebug DebugInfo { get; set; } = new();
             public bool IsRecursive { get; set; }
             public FileAttributes AttributesToSkip { get; set; }
@@ -111,7 +111,7 @@ namespace plugins.eliminator
                 PrintWarning($"Conferma bypassata con --force|-f.");
             }
 
-            ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(State.IsDebug ? "(DEBUG)" : "")}");
+            ConsolePlus.Write($"[Cyan]#[/] Avvio cancellazione ... {(State.IsWhatIf ? "(DEBUG)" : "")}");
 
             // 3. inizializzo il task di producer
             var producerTask = CreateProducerTask(settings, ct);
@@ -153,7 +153,7 @@ namespace plugins.eliminator
                 return false;
 
             State.TargetPath = targetPath;
-            State.IsDebug = settings.Debug;
+            State.IsWhatIf = settings.WhatIf;
             State.IsRecursive = settings.Recursive;
             State.ThreadNumber = settings.Threads ?? Environment.ProcessorCount;
 
@@ -271,7 +271,7 @@ namespace plugins.eliminator
                     foreach (var item in itemsToScan)
                     {
                         ct.ThrowIfCancellationRequested();
-                        if (State.IsDebug)
+                        if (State.IsWhatIf)
                         {
                             State.DebugInfo.DroppedFilesCount++;
                             State.DebugInfo.BytesSaved += item.Length;
@@ -390,7 +390,7 @@ namespace plugins.eliminator
         {
             return Task.Run(async () =>
             {
-                if (State.IsDebug)
+                if (State.IsWhatIf)
                 {
                     // Modalità DEBUG: schermata semplice con DroppedFilesCountDebug e BytesSavedDebug
                     try

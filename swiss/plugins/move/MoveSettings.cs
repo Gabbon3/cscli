@@ -14,8 +14,8 @@ namespace plugins.move
 
         // --- opzioni del comando ---
 
-        [Option("debug|d", "Simula l'operazione senza toccare i file sul disco (Dry-run)", "Comando")]
-        public bool Debug { get; set; }
+        [Option(CliMeta.WhatIfFlag, CliMeta.WhatIfDescription, "Comando")]
+        public bool WhatIf { get; set; }
 
         [Option("recursive|r", "Scansiona anche le sottocartelle e ricrea l'albero nella destinazione", "Comando")]
         public bool Recursive { get; set; }

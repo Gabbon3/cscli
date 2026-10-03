@@ -34,7 +34,7 @@ class MovePlugin : Plugin
         public string SourcePath { get; set; } = string.Empty;
         public string DestinationPath { get; set; } = string.Empty;
 
-        public bool IsDebug { get; set; }
+        public bool IsWhatIf { get; set; }
         public bool IsRecursive { get; set; }
         public bool Overwrite { get; set; }
         public bool IgnoreErrors { get; set; }
@@ -86,7 +86,7 @@ class MovePlugin : Plugin
         State.LastRateTickMs = nowMs;
         State.LastRateFilesCount = 0;
 
-        ConsolePlus.Write($"[Cyan]#[/] Avvio spostamento verso [Yellow]{State.DestinationPath}[/] ... {(State.IsDebug ? "(DEBUG)" : "")}");
+        ConsolePlus.Write($"[Cyan]#[/] Avvio spostamento verso [Yellow]{State.DestinationPath}[/] ... {(State.IsWhatIf ? "(DEBUG)" : "")}");
 
         await RunMoveSingleThread(ct);
 
@@ -131,7 +131,7 @@ class MovePlugin : Plugin
 
         State.SourcePath = normalizedSourcePath;
         State.DestinationPath = normalizedDestPath;
-        State.IsDebug = settings.Debug;
+        State.IsWhatIf = settings.WhatIf;
         State.IsRecursive = settings.Recursive;
         State.Overwrite = settings.Overwrite;
         State.IgnoreErrors = settings.IgnoreErrors;
@@ -163,7 +163,7 @@ class MovePlugin : Plugin
             return false;
         }
 
-        if (!State.IsDebug && !Directory.Exists(State.DestinationPath))
+        if (!State.IsWhatIf && !Directory.Exists(State.DestinationPath))
         {
             try
             {
@@ -223,7 +223,7 @@ class MovePlugin : Plugin
                     if (entry.IsDirectory) return false;
                     if (State.FileFilter != null && !State.FileFilter(ref entry)) return false;
 
-                    if (!State.IsDebug)
+                    if (!State.IsWhatIf)
                     {
                         ReadOnlySpan<char> currentSourceDir = entry.Directory;
 
@@ -255,7 +255,7 @@ class MovePlugin : Plugin
 
                 try
                 {
-                    if (State.IsDebug)
+                    if (State.IsWhatIf)
                     {
                         ConsolePlus.Write($"[DarkGray]{item.AsDirectorySpan()}[Cyan]{item.AsNameSpan()}[/]");
                     }
@@ -372,7 +372,7 @@ class MovePlugin : Plugin
     /// </summary>
     private void PrintProgressIfNeeded()
     {
-        if (State.IsSilent || State.IsDebug) return;
+        if (State.IsSilent || State.IsWhatIf) return;
 
         long nowMs = Environment.TickCount64;
         if (nowMs - State.LastProgressTickMs < 250) return;
