@@ -34,6 +34,7 @@ namespace plugins.find
 
         [Option(CliMeta.MinSizeFlag, CliMeta.MinSizeDesc, "Configurazione")]
         public RelativeSize? MinSize { get; set; }
+        
         [Option(CliMeta.MaxSizeFlag, CliMeta.MaxSizeDesc, "Configurazione")]
         public RelativeSize? MaxSize { get; set; }
 
